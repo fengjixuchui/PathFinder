@@ -1,76 +1,84 @@
 #include "PipelineResourceSchedulingInfo.hpp"
 
+#include "../Foundation/Assert.hpp"
+
 namespace PathFinder
 {
 
-    PipelineResourceSchedulingInfo::PipelineResourceSchedulingInfo(Foundation::Name resourceName, const HAL::ResourceFormat& format, uint64_t resourceCount)
-        : mResourceFormat{ format }, mResourceName{ resourceName }, mResourceCount{ resourceCount }, mSubresourceCount{ format.SubresourceCount() }
-    {
-        mResourceSchedulingMetadata.resize(resourceCount);
-
-        for (SubresourceArray& innerArray : mResourceSchedulingMetadata)
-        {
-            innerArray.resize(mSubresourceCount);
-        }
-    }
+    PipelineResourceSchedulingInfo::PipelineResourceSchedulingInfo(Foundation::Name resourceName, const HAL::ResourceFormat& format)
+        : mResourceFormat{ format }, mResourceName{ resourceName }, mSubresourceCount{ format.SubresourceCount() } {}
 
     void PipelineResourceSchedulingInfo::FinishScheduling()
     {
-        HAL::ResourceState initialStates = HAL::ResourceState::Common;
         HAL::ResourceState expectedStates = HAL::ResourceState::Common;
 
-        // Get subresources for each resource in the array
-        for (const SubresourceArray& subresources : mResourceSchedulingMetadata)
-        {
-            // Get per pass scheduling info for each subresource
-            for (const PassInfoMap& subresourcePerPassData : subresources)
-            {
-                // Get scheduling metadata for each render pass that requested usage of this subresource
-                for (const auto& [passName, metadata] : subresourcePerPassData)
-                {
-                    expectedStates |= metadata.RequestedState;
+        mSubresourceCombinedReadStates.resize(mSubresourceCount);
+        mSubresourceWriteStates.resize(mSubresourceCount);
 
-                    if (passName == mFirstPassGraphNode.PassMetadata.Name)
-                    {
-                        initialStates |= initialStates;
-                    }
+        for (auto& [passName, info] : mPassInfoMap)
+        {
+            for (auto subresourceIdx = 0; subresourceIdx < mSubresourceCount; ++subresourceIdx)
+            {
+                std::optional<SubresourceInfo>& subresourceInfo = info.SubresourceInfos[subresourceIdx];
+
+                if (!subresourceInfo)
+                {
+                    continue;
+                }
+
+                expectedStates |= subresourceInfo->RequestedState;
+
+                if (EnumMaskBitSet(expectedStates, HAL::ResourceState::UnorderedAccess))
+                {
+                    info.NeedsUnorderedAccessBarrier = true;
+                }
+
+                if (IsResourceStateReadOnly(subresourceInfo->RequestedState))
+                {
+                    mSubresourceCombinedReadStates[subresourceIdx] |= subresourceInfo->RequestedState;
+                }
+                else
+                {
+                    assert_format(mSubresourceWriteStates[subresourceIdx] == HAL::ResourceState::Common,
+                        "One write state is already requested. Engine architecture allows one write per frame.");
+
+                    mSubresourceWriteStates[subresourceIdx] = subresourceInfo->RequestedState;
                 }
             }
+
         }
 
-        mInitialStates = initialStates;
         mExpectedStates = expectedStates;
         mResourceFormat.SetExpectedStates(expectedStates);
     }
 
-    const PipelineResourceSchedulingInfo::PassInfo* PipelineResourceSchedulingInfo::GetInfoForPass(Foundation::Name passName, uint64_t resourceIndex, uint64_t subresourceIndex) const
+    const PipelineResourceSchedulingInfo::PassInfo* PipelineResourceSchedulingInfo::GetInfoForPass(Foundation::Name passName) const
     {
-        const SubresourceArray& subresourceArray = mResourceSchedulingMetadata[resourceIndex];
-        const PassInfoMap& passInfoMap = subresourceArray[subresourceIndex];
-        auto it = passInfoMap.find(passName);
-        return it != passInfoMap.end() ? &it->second : nullptr;
+        auto it = mPassInfoMap.find(passName);
+        return it != mPassInfoMap.end() ? &it->second : nullptr;
     }
 
-    PipelineResourceSchedulingInfo::PassInfo* PipelineResourceSchedulingInfo::GetInfoForPass(Foundation::Name passName, uint64_t resourceIndex, uint64_t subresourceIndex)
+    PipelineResourceSchedulingInfo::PassInfo* PipelineResourceSchedulingInfo::GetInfoForPass(Foundation::Name passName)
     {
-        SubresourceArray& subresourceArray = mResourceSchedulingMetadata[resourceIndex];
-        PassInfoMap& passInfoMap = subresourceArray[subresourceIndex];
-        auto it = passInfoMap.find(passName);
-        return it != passInfoMap.end() ? &it->second : nullptr;
+        auto it = mPassInfoMap.find(passName);
+        return it != mPassInfoMap.end() ? &it->second : nullptr;
     }
 
-    PipelineResourceSchedulingInfo::PassInfo& PipelineResourceSchedulingInfo::AllocateInfoForPass(const RenderPassExecutionGraph::Node& passNode, uint64_t resourceIndex, uint64_t subresourceIndex)
+    PipelineResourceSchedulingInfo::PassInfo& PipelineResourceSchedulingInfo::AllocateInfoForPass(Foundation::Name passName)
     {
-        // Empty name means we have not set first pass node yet
-        if (!mFirstPassGraphNode.PassMetadata.Name.IsValid())
-        {
-            mFirstPassGraphNode = passNode;
-        }
-
-        mLastPassGraphNode = passNode;
-
-        auto [it, success] = mResourceSchedulingMetadata[resourceIndex][subresourceIndex].emplace(passNode.PassMetadata.Name, PassInfo{});
+        auto [it, success] = mPassInfoMap.emplace(passName, PassInfo{});
+        it->second.SubresourceInfos.resize(mSubresourceCount);
         return it->second;
+    }
+
+    HAL::ResourceState PipelineResourceSchedulingInfo::GetSubresourceCombinedReadStates(uint64_t subresourceIndex) const
+    {
+        return mSubresourceCombinedReadStates[subresourceIndex];
+    }
+
+    HAL::ResourceState PipelineResourceSchedulingInfo::GetSubresourceWriteState(uint64_t subresourceIndex) const
+    {
+        return mSubresourceWriteStates[subresourceIndex];
     }
 
 }

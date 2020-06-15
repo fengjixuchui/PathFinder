@@ -4,71 +4,66 @@
 namespace PathFinder
 {
 
-    ResourceProvider::ResourceProvider(const PipelineResourceStorage* storage)
-        : mResourceStorage{ storage } {}
+    ResourceProvider::ResourceProvider(const PipelineResourceStorage* storage, const RenderPassGraph::Node* passNode)
+        : mResourceStorage{ storage }, mPassNode{ passNode } {}
 
-    uint32_t ResourceProvider::GetUATextureIndex(const ResourceKey& textureKey, uint8_t mipLevel)
+    uint32_t ResourceProvider::GetUATextureIndex(Foundation::Name textureName, uint8_t mipLevel)
     {
-        const PipelineResourceStorageResource* resourceObjects = mResourceStorage->GetPerResourceData(textureKey.ResourceName());
-        const Memory::Texture* resource = resourceObjects->GetTexture(textureKey.IndexInArray());
-        assert_format(resource, "Resource ", textureKey.ResourceName().ToString(), " does not exist");
+        /*const PipelineResourceStorageResource* resourceObjects = mResourceStorage->GetPerResourceData(textureName);
+        assert_format(resourceObjects && resourceObjects->Texture, "Resource ", textureName.ToString(), " does not exist");
 
-        Foundation::Name passName = mResourceStorage->CurrentPassGraphNode().PassMetadata.Name;
-        const PipelineResourceSchedulingInfo::PassInfo* perPassData = resourceObjects->SchedulingInfo.GetInfoForPass(passName, textureKey.IndexInArray(), mipLevel);
+        Foundation::Name passName = mResourceStorage->CurrentPassGraphNode()->PassMetadata().Name;
+        const PipelineResourceSchedulingInfo::PassSubresourceInfo* perPassData = resourceObjects->SchedulingInfo.GetInfoForPass(passName, mipLevel);
 
         assert_format(perPassData,
             "Resource ",
-            textureKey.ResourceName().ToString(),
-            " at index ",
-            std::to_string(textureKey.IndexInArray()),
+            textureName.ToString(),
             " was not scheduled for usage in ",
             passName.ToString());
 
         assert_format(perPassData->IsTextureUARequested(),
-            "Resource ", 
-            textureKey.ResourceName().ToString(),
+            "Resource ",
+            textureName.ToString(),
             " was not scheduled to be accessed as Unordered Access resource in ",
             passName.ToString());
 
-        return resource->GetUADescriptor(mipLevel)->IndexInHeapRange();
+        return resourceObjects->Texture->GetUADescriptor(mipLevel)->IndexInHeapRange();*/
+
+        return 0;
     }
 
-    uint32_t ResourceProvider::GetSRTextureIndex(const ResourceKey& textureKey, uint8_t mipLevel)
+    uint32_t ResourceProvider::GetSRTextureIndex(Foundation::Name textureName, uint8_t mipLevel)
     {
-        const PipelineResourceStorageResource* resourceObjects = mResourceStorage->GetPerResourceData(textureKey.ResourceName());
-        const Memory::Texture* resource = resourceObjects->GetTexture(textureKey.IndexInArray());
-        assert_format(resource, "Resource ", textureKey.ResourceName().ToString(), " does not exist");
+        //const PipelineResourceStorageResource* resourceObjects = mResourceStorage->GetPerResourceData(textureName);
+        //assert_format(resourceObjects && resourceObjects->Texture, "Resource ", textureName.ToString(), " does not exist");
 
-        Foundation::Name passName = mResourceStorage->CurrentPassGraphNode().PassMetadata.Name;
+        //Foundation::Name passName = mResourceStorage->CurrentPassGraphNode()->PassMetadata().Name;
 
-        // Mip level only used for sanity check. It doesn't alter SRV in any way in current implementation.
-        const PipelineResourceSchedulingInfo::PassInfo* perPassData = resourceObjects->SchedulingInfo.GetInfoForPass(passName, textureKey.IndexInArray(), mipLevel);
+        //// Mip level only used for sanity check. It doesn't alter SRV in any way in current implementation.
+        //const PipelineResourceSchedulingInfo::PassSubresourceInfo* perPassData = resourceObjects->SchedulingInfo.GetInfoForPass(passName, mipLevel);
 
-        assert_format(perPassData,
-            "Resource ",
-            textureKey.ResourceName().ToString(),
-            " at index ",
-            std::to_string(textureKey.IndexInArray()),
-            " was not scheduled for usage in ",
-            passName.ToString());
+        //assert_format(perPassData,
+        //    "Resource ",
+        //    textureName.ToString(),
+        //    " was not scheduled for usage in ",
+        //    passName.ToString());
 
-        assert_format(perPassData->IsTextureSRRequested(),
-            "Resource ", 
-            textureKey.ResourceName().ToString(),
-            " was not scheduled to be accessed as Shader Resource in ",
-            passName.ToString());
+        //assert_format(perPassData->IsTextureSRRequested(),
+        //    "Resource ", 
+        //    textureName.ToString(),
+        //    " was not scheduled to be accessed as Shader Resource in ",
+        //    passName.ToString());
 
-        return resource->GetSRDescriptor()->IndexInHeapRange();
+        //return resourceObjects->Texture->GetSRDescriptor()->IndexInHeapRange();
+
+        return 0;
     }
 
     const HAL::Texture::Properties& ResourceProvider::GetTextureProperties(Foundation::Name resourceName)
     {
         const PipelineResourceStorageResource* resourceObjects = mResourceStorage->GetPerResourceData(resourceName);
-        // Since all textures in the array have identical properties, get first 
-        const Memory::Texture* resource = resourceObjects->GetTexture();
-        assert_format(resource, "Resource ", resourceName.ToString(), " does not exist");
-
-        return resource->Properties();
+        assert_format(resourceObjects && resourceObjects->Texture, "Resource ", resourceName.ToString(), " does not exist");
+        return resourceObjects->Texture->Properties();
     }
 
 }

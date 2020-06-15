@@ -16,45 +16,45 @@ namespace PathFinder
     void DenoiserPreBlurRenderPass::ScheduleResources(ResourceScheduler* scheduler)
     {
         scheduler->NewTexture(ResourceNames::DenoisedPreBlurIntermediate);
-        scheduler->ReadWriteTexture(ResourceNames::StochasticShadowedShadingOutput);
-        scheduler->ReadWriteTexture(ResourceNames::StochasticUnshadowedShadingOutput);
+        /* scheduler->ReadWriteTexture(ResourceNames::StochasticShadowedShadingOutput);
+         scheduler->ReadWriteTexture(ResourceNames::StochasticUnshadowedShadingOutput);*/
     }
      
     void DenoiserPreBlurRenderPass::Render(RenderContext<RenderPassContentMediator>* context)
     {
-        context->GetCommandRecorder()->ApplyPipelineState(PSONames::SeparableBlur);
+        /*context->GetCommandRecorder()->ApplyPipelineState(PSONames::SeparableBlur);
 
         BlurTexture(context, ResourceNames::StochasticShadowedShadingOutput);
-        BlurTexture(context, ResourceNames::StochasticUnshadowedShadingOutput);
+        BlurTexture(context, ResourceNames::StochasticUnshadowedShadingOutput);*/
     }
 
     void DenoiserPreBlurRenderPass::BlurTexture(RenderContext<RenderPassContentMediator>* context, Foundation::Name textureName)
     {
-        auto resourceProvider = context->GetResourceProvider();
+        //auto resourceProvider = context->GetResourceProvider();
 
-        Geometry::Dimensions dispatchDimensions = resourceProvider->GetTextureProperties(textureName).Dimensions;
+        //Geometry::Dimensions dispatchDimensions = resourceProvider->GetTextureProperties(textureName).Dimensions;
 
-        BlurCBContent cbContent{};
-        cbContent.BlurRadius = 5;
-        cbContent.IsHorizontal = true;
-        cbContent.Weights.fill(1.0f / cbContent.BlurRadius);
-        auto kernel = Foundation::Gaussian::Kernel1D(cbContent.BlurRadius);
-        std::move(kernel.begin(), kernel.end(), cbContent.Weights.begin());
-        cbContent.ImageSize = { dispatchDimensions.Width, dispatchDimensions.Height };
+        //BlurCBContent cbContent{};
+        //cbContent.BlurRadius = 5;
+        //cbContent.IsHorizontal = true;
+        //cbContent.Weights.fill(1.0f / cbContent.BlurRadius);
+        //auto kernel = Foundation::Gaussian::Kernel1D(cbContent.BlurRadius);
+        //std::move(kernel.begin(), kernel.end(), cbContent.Weights.begin());
+        //cbContent.ImageSize = { dispatchDimensions.Width, dispatchDimensions.Height };
 
-        cbContent.InputTexIdx = resourceProvider->GetUATextureIndex(textureName);
-        cbContent.OutputTexIdx = resourceProvider->GetUATextureIndex(ResourceNames::DenoisedPreBlurIntermediate);
+        //cbContent.InputTexIdx = resourceProvider->GetUATextureIndex(textureName);
+        //cbContent.OutputTexIdx = resourceProvider->GetUATextureIndex(ResourceNames::DenoisedPreBlurIntermediate);
 
-        context->GetConstantsUpdater()->UpdateRootConstantBuffer(cbContent);
-        context->GetCommandRecorder()->Dispatch(dispatchDimensions, { 256, 1 });
+        //context->GetConstantsUpdater()->UpdateRootConstantBuffer(cbContent);
+        //context->GetCommandRecorder()->Dispatch(dispatchDimensions, { 256, 1 });
 
-        // Blur vertical
-        std::swap(dispatchDimensions.Width, dispatchDimensions.Height);
-        std::swap(cbContent.InputTexIdx, cbContent.OutputTexIdx);
-        cbContent.IsHorizontal = false;
+        //// Blur vertical
+        //std::swap(dispatchDimensions.Width, dispatchDimensions.Height);
+        //std::swap(cbContent.InputTexIdx, cbContent.OutputTexIdx);
+        //cbContent.IsHorizontal = false;
 
-        context->GetConstantsUpdater()->UpdateRootConstantBuffer(cbContent);
-        context->GetCommandRecorder()->Dispatch(dispatchDimensions, { 256, 1 });
+        //context->GetConstantsUpdater()->UpdateRootConstantBuffer(cbContent);
+        //context->GetCommandRecorder()->Dispatch(dispatchDimensions, { 256, 1 });
     }
 
 }

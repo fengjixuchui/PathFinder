@@ -2,8 +2,13 @@
 
 #include "../Foundation/Name.hpp"
 
+#include <array>
+
 namespace PathFinder
 {
+
+    template <size_t Count>
+    using NameArray = std::array<Foundation::Name, Count>;
 
     namespace ResourceNames
     {
@@ -18,7 +23,7 @@ namespace PathFinder
         inline Foundation::Name GBufferMotionVector{ "Resource_GBuffer_Motion_Vector" };
         inline Foundation::Name GBufferTypeAndMaterialIndex{ "Resource_GBuffer_Type_And_Material_Index" };
         inline Foundation::Name GBufferDepthStencil{ "Resource_GBuffer_Depth_Stencil" };
-        inline Foundation::Name GBufferViewDepth{ "Resource_GBuffer_View_Depth" };
+        inline NameArray<2> GBufferViewDepth{ "Resource_GBuffer_View_Depth[0]", "Resource_GBuffer_View_Depth[1]" };
 
         inline Foundation::Name ShadingAnalyticOutput{ "Resource_Shading_Analytic_Output" };
 

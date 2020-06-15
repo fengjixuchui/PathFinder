@@ -24,8 +24,8 @@ namespace PathFinder
         scheduler->ReadTexture(ResourceNames::GBufferNormalRoughness);
         scheduler->ReadTexture(ResourceNames::GBufferMotionVector);
         scheduler->ReadTexture(ResourceNames::GBufferDepthStencil);
-        scheduler->ReadTexture({ ResourceNames::GBufferViewDepth, currentFrameIndex });
-        scheduler->ReadTexture({ ResourceNames::DenoiserReprojectedFramesCount, currentFrameIndex });
+   /*     scheduler->ReadTexture({ ResourceNames::GBufferViewDepth, currentFrameIndex });
+        scheduler->ReadTexture({ ResourceNames::DenoiserReprojectedFramesCount, currentFrameIndex });*/
         scheduler->ReadTexture(ResourceNames::StochasticShadowedShadingReprojected);
         scheduler->ReadTexture(ResourceNames::StochasticUnshadowedShadingReprojected);
         scheduler->ReadTexture(ResourceNames::StochasticShadowedShadingOutput);
@@ -46,8 +46,8 @@ namespace PathFinder
         cbContent.GBufferIndices.NormalRoughnessTexIdx = resourceProvider->GetSRTextureIndex(ResourceNames::GBufferNormalRoughness);
         cbContent.GBufferIndices.MotionTexIdx = resourceProvider->GetSRTextureIndex(ResourceNames::GBufferMotionVector);
         cbContent.GBufferIndices.DepthStencilTexIdx = resourceProvider->GetSRTextureIndex(ResourceNames::GBufferDepthStencil);
-        cbContent.GBufferIndices.ViewDepthTexIdx = resourceProvider->GetSRTextureIndex({ ResourceNames::GBufferViewDepth, currentFrameIndex });
-        cbContent.AccumulatedFramesCountTexIdx = resourceProvider->GetSRTextureIndex({ ResourceNames::DenoiserReprojectedFramesCount, currentFrameIndex });
+        //cbContent.GBufferIndices.ViewDepthTexIdx = resourceProvider->GetSRTextureIndex({ ResourceNames::GBufferViewDepth, currentFrameIndex });
+        //cbContent.AccumulatedFramesCountTexIdx = resourceProvider->GetSRTextureIndex({ ResourceNames::DenoiserReprojectedFramesCount, currentFrameIndex });
         cbContent.CurrentShadowedShadingTexIdx = resourceProvider->GetSRTextureIndex(ResourceNames::StochasticShadowedShadingOutput);
         cbContent.CurrentUnshadowedShadingTexIdx = resourceProvider->GetSRTextureIndex(ResourceNames::StochasticUnshadowedShadingOutput);
         cbContent.ShadowedShadingHistoryTexIdx = resourceProvider->GetSRTextureIndex(ResourceNames::StochasticShadowedShadingReprojected);

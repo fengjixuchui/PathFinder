@@ -20,8 +20,10 @@ namespace PathFinder
     {
         scheduler->NewTexture(ResourceNames::StochasticShadowedShadingDenoisedStabilized);
         scheduler->NewTexture(ResourceNames::StochasticUnshadowedShadingDenoisedStabilized);
-        scheduler->ReadWriteTexture(ResourceNames::StochasticShadowedShadingDenoised);
-        scheduler->ReadWriteTexture(ResourceNames::StochasticUnshadowedShadingDenoised);
+   /*     scheduler->ReadWriteTexture(ResourceNames::StochasticShadowedShadingDenoised);
+        scheduler->ReadWriteTexture(ResourceNames::StochasticUnshadowedShadingDenoised);*/
+
+        //scheduler->NewTexture(ResourceNames::StochasticShadowedShadingOutput);
     }
      
     void DenoiserPostStabilizationRenderPass::Render(RenderContext<RenderPassContentMediator>* context)

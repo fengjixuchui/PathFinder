@@ -5,17 +5,18 @@
 #include "../HardwareAbstractionLayer/ResourceFormat.hpp"
 
 #include "PipelineResourceSchedulingInfo.hpp"
-#include "RenderPassExecutionGraph.hpp"
+#include "RenderPassGraph.hpp"
 
 #include <set>
 
 namespace PathFinder
 {
 
+    // Helper class to determine memory aliasing properties
     class PipelineResourceMemoryAliaser
     {
     public:
-        PipelineResourceMemoryAliaser(const RenderPassExecutionGraph* renderPassGraph);
+        PipelineResourceMemoryAliaser(const RenderPassGraph* renderPassGraph);
 
         void AddSchedulingInfo(PipelineResourceSchedulingInfo* schedulingInfo);
         uint64_t Alias();
@@ -67,7 +68,7 @@ namespace PathFinder
 
         AliasingMetadataSet mSchedulingInfos;
         
-        const RenderPassExecutionGraph* mRenderPassGraph;
+        const RenderPassGraph* mRenderPassGraph;
     };
 
 }

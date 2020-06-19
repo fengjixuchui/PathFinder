@@ -15,7 +15,7 @@ namespace PathFinder
         mDescriptorAllocator{ &mDevice, mSimultaneousFramesInFlight },
         mResourceProducer{ &mDevice, &mResourceAllocator, &mResourceStateTracker, &mDescriptorAllocator },
         mPipelineResourceStorage{ &mDevice, &mResourceProducer, &mDescriptorAllocator, &mResourceStateTracker, mRenderSurfaceDescription, &mRenderPassGraph },
-        mResourceScheduler{ &mPipelineResourceStorage, &mPassUtilityProvider },
+        mResourceScheduler{ &mPipelineResourceStorage, &mPassUtilityProvider, &mRenderPassGraph },
         mShaderManager{ commandLineParser },
         mPipelineStateManager{ &mDevice, &mShaderManager, &mResourceProducer, mRenderSurfaceDescription },
         mPipelineStateCreator{ &mPipelineStateManager },

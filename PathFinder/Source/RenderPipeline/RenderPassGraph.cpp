@@ -38,6 +38,8 @@ namespace PathFinder
 
     void RenderPassGraph::Build()
     {
+        BuildAdjacencyLists();
+        TopologicalSort();
         BuildDependencyLevels();
         FinalizeDependencyLevels();
         CullRedundantSynchronizations();
@@ -50,6 +52,7 @@ namespace PathFinder
         mResourceUsageTimelines.clear();
         mQueueNodeCounters.clear();
         mOrderedNodes.clear();
+        mAdjacencyLists.clear();
         mFirstNodeThatUsesRayTracing = nullptr;
         mDetectedQueueCount = 1;
 
@@ -78,116 +81,122 @@ namespace PathFinder
         mRenderPassRegistry.insert(passName);
     }
 
-    void RenderPassGraph::BuildDependencyLevels()
+    void RenderPassGraph::BuildAdjacencyLists()
     {
-        DependencyLevel& baseDependencyLevel = mDependencyLevels.emplace_back(mDependencyLevels.size());
+        mAdjacencyLists.resize(mPassNodes.size());
 
-        mDetectedQueueCount = 1;
-
-        // Fill base dependency level to start from
-        for (Node& node : mPassNodes)
+        for (auto nodeIdx = 0; nodeIdx < mPassNodes.size(); ++nodeIdx)
         {
-            baseDependencyLevel.AddNode(&node);
-            mDetectedQueueCount = std::max(mDetectedQueueCount, node.ExecutionQueueIndex + 1);
-        }
+            Node& node = mPassNodes[nodeIdx];
+            std::vector<uint64_t>& adjacentNodeIndices = mAdjacencyLists[nodeIdx];
 
-        std::vector<DependencyLevel::NodeIterator> nodesToMoveToNextLevel;
-
-        do
-        {
-            assert_format(mDependencyLevels.size() <= mPassNodes.size(), "Graph builder is going into infinite loop");
-
-            DependencyLevel& nextDependencyLevel = mDependencyLevels.emplace_back(mDependencyLevels.size());
-            DependencyLevel& currentDependencyLevel = mDependencyLevels[mDependencyLevels.size() - 2];
-
-            nodesToMoveToNextLevel.clear();
-
-            // Take a node from the current dependency level
-            for (auto nodeIt = currentDependencyLevel.mNodes.begin(); nodeIt != currentDependencyLevel.mNodes.end(); nodeIt++)
+            for (auto otherNodeIdx = 0; otherNodeIdx < mPassNodes.size(); ++otherNodeIdx)
             {
-                Node* node = *nodeIt;
+                // Do not check dependencies on itself
+                if (nodeIdx == otherNodeIdx) continue;
 
-                // Go through every other node in this dependency level and see if current node depends on any of the other ones
-                for (auto otherNodeIt = currentDependencyLevel.mNodes.begin(); otherNodeIt != currentDependencyLevel.mNodes.end(); otherNodeIt++)
+                Node& otherNode = mPassNodes[otherNodeIdx];
+
+                for (SubresourceName otherNodeReadResource : otherNode.ReadSubresources())
                 {
-                    // Do not check dependencies on itself
-                    if (nodeIt == otherNodeIt) continue;
+                    // If other node reads a subresource written by the current node, then it depends on current node and is an adjacent dependency
+                    bool otherNodeDependsOnCurrentNode = node.WrittenSubresources().find(otherNodeReadResource) != node.WrittenSubresources().end();
 
-                    Node* otherNode = *otherNodeIt;
-
-                    for (SubresourceName otherNodeWrittenResource : otherNode->WrittenSubresources())
+                    if (otherNodeDependsOnCurrentNode)
                     {
-                        // If current node reads resource that is written by other node in current dependency level,
-                        // then it depends on the other node and should be moved to the next dependency level
-                        bool thisNodeReadsOtherNodeResource = node->ReadSubresources().find(otherNodeWrittenResource) != node->ReadSubresources().end();
-
-                        // If this node is not dependent on the other, check the next one
-                        if (!thisNodeReadsOtherNodeResource)
-                        {
-                            continue;
-                        }
+                        adjacentNodeIndices.push_back(otherNodeIdx);
 
                         // Signal only for cross-queue dependencies
-                        if (node->ExecutionQueueIndex != otherNode->ExecutionQueueIndex)
+                        if (node.ExecutionQueueIndex != otherNode.ExecutionQueueIndex)
                         {
-                            otherNode->mSyncSignalRequired = true;
+                            otherNode.mSyncSignalRequired = true;
                         }
 
                         // Adding dependency even from the same queue is convenient 
                         // for dependency optimization pass later.
-                        node->mNodesToSyncWith.push_back(otherNode);
+                        node.mNodesToSyncWith.push_back(&otherNode);
 
-                        // Check for circular dependencies
-                        bool otherNodeReadsCurrentNodeResources = false;
-
-                        for (SubresourceName currentNodeWrittenResource : node->WrittenSubresources())
-                        {
-                            if (otherNode->ReadSubresources().find(currentNodeWrittenResource) != otherNode->ReadSubresources().end())
-                            {
-                                otherNodeReadsCurrentNodeResources = true;
-                                break;
-                            }
-                        }
-
-                        auto [resourceName, subresourceIndex] = DecodeSubresourceName(otherNodeWrittenResource);
-
-                        assert_format(!otherNodeReadsCurrentNodeResources,
-                            "Detected a circular dependency between render passes: ",
-                            node->PassMetadata().Name.ToString(), " and ",
-                            otherNode->PassMetadata().Name.ToString(), ". \n",
-                            "Dependency is: Resource ", resourceName.ToString(), ", Subresource ", subresourceIndex);
-
-                        // One found dependency is enough 
-                        nodesToMoveToNextLevel.push_back(nodeIt);
                         break;
                     }
                 }
             }
+        }
+    }
 
-            // Move nodes with dependencies to next level
-            if (!nodesToMoveToNextLevel.empty())
-            {
-                for (auto it : nodesToMoveToNextLevel)
-                {
-                    Node* node = currentDependencyLevel.RemoveNode(it);
-                    node->mDependencyLevelIndex++;
-                    nextDependencyLevel.AddNode(node);
-                }
-            }
-            else
-            {
-                mDependencyLevels.pop_back();
-            }
+    void RenderPassGraph::DepthFirstSearch(uint64_t nodeIndex, std::vector<bool>& visited, std::vector<bool>& onStack, bool& isCyclic)
+    {
+        if (isCyclic) return;
 
-        } while (!nodesToMoveToNextLevel.empty());
+        visited[nodeIndex] = true;
+        onStack[nodeIndex] = true;
 
-        for (DependencyLevel& level : mDependencyLevels)
+        for (uint64_t neighbour : mAdjacencyLists[nodeIndex])
         {
-            OutputDebugString(StringFormat("Level %d: \n\n", level.LevelIndex()).c_str());
-            for (Node* node : level.Nodes())
+            if (visited[neighbour] && onStack[neighbour])
             {
-                OutputDebugString(StringFormat("Pass %s: \n", node->PassMetadata().Name.ToString().c_str()).c_str());
+                isCyclic = true;
+                return;
             }
+
+            if (!visited[neighbour]) 
+            {
+                DepthFirstSearch(neighbour, visited, onStack, isCyclic);
+            }
+        }
+
+        onStack[nodeIndex] = false;
+        mOrderedNodes.push_back(&mPassNodes[nodeIndex]);
+    }
+
+    void RenderPassGraph::TopologicalSort()
+    {
+        std::vector<bool> visitedNodes(mPassNodes.size(), false);
+        std::vector<bool> onStackNodes(mPassNodes.size(), false);
+
+        bool isCyclic = false;
+
+        for (auto nodeIndex = 0; nodeIndex < mPassNodes.size(); ++nodeIndex)
+        {
+            if (!visitedNodes[nodeIndex])
+            {
+                DepthFirstSearch(nodeIndex, visitedNodes, onStackNodes, isCyclic);
+                assert_format(!isCyclic, "Detected cyclic dependency in pass: ", mPassNodes[nodeIndex].PassMetadata().Name.ToString());
+            }
+        }
+
+        std::reverse(mOrderedNodes.begin(), mOrderedNodes.end());
+
+        for (const Node* node : mOrderedNodes)
+        {
+            OutputDebugString(StringFormat("%s \n", node->PassMetadata().Name.ToString().c_str()).c_str());
+        }
+    }
+
+    void RenderPassGraph::BuildDependencyLevels()
+    {
+        std::vector<uint64_t> indegreeLevels(mOrderedNodes.size(), 0);
+        uint64_t indegreeLevelCount = 0;
+
+        for (const std::vector<uint64_t>& adjacencyList : mAdjacencyLists)
+        {
+            for (uint64_t adjacendNodeIndex : adjacencyList)
+            {
+                indegreeLevels[adjacendNodeIndex]++;
+                indegreeLevelCount = std::max(indegreeLevelCount, indegreeLevels[adjacendNodeIndex] + 1);
+            }
+        }
+
+        mDetectedQueueCount = 1;
+        mDependencyLevels.resize(indegreeLevelCount);
+
+        for (auto nodeIndex = 0; nodeIndex < mOrderedNodes.size(); ++nodeIndex)
+        {
+            Node* node = mOrderedNodes[nodeIndex];
+            uint64_t indegree = indegreeLevels[nodeIndex];
+            DependencyLevel& dependencyLevel = mDependencyLevels[indegree];
+            dependencyLevel.mLevelIndex = indegree;
+            dependencyLevel.AddNode(node);
+            mDetectedQueueCount = std::max(mDetectedQueueCount, node->ExecutionQueueIndex + 1);
         }
     }
 
@@ -215,7 +224,6 @@ namespace PathFinder
                 node->mLocalToDependencyLevelExecutionIndex = localExecutionIndex;
                 node->mLocalToQueueExecutionIndex = mQueueNodeCounters[node->ExecutionQueueIndex]++;
 
-                mOrderedNodes.push_back(node);
                 dependencyLevel.mNodesPerQueue[node->ExecutionQueueIndex].push_back(node);
 
                 for (SubresourceName subresourceName : node->AllSubresources())
@@ -404,6 +412,16 @@ namespace PathFinder
     RenderPassGraph::Node::Node(const RenderPassMetadata& passMetadata, WriteDependencyRegistry* writeDependencyRegistry)
         : mPassMetadata{ passMetadata }, mWriteDependencyRegistry{ writeDependencyRegistry } {}
 
+    bool RenderPassGraph::Node::operator==(const Node& that) const
+    {
+        return mPassMetadata.Name == that.mPassMetadata.Name;
+    }
+
+    bool RenderPassGraph::Node::operator!=(const Node& that) const
+    {
+        return !(*this == that);
+    }
+
     void RenderPassGraph::Node::AddReadDependency(Foundation::Name resourceName, uint32_t firstSubresourceIndex, uint32_t lastSubresourceIndex)
     {
         for (auto i = firstSubresourceIndex; i <= lastSubresourceIndex; ++i)
@@ -515,9 +533,6 @@ namespace PathFinder
 
         mWriteDependencyRegistry->insert(name);
     }
-
-    RenderPassGraph::DependencyLevel::DependencyLevel(uint64_t levelIndex)
-        : mLevelIndex{ levelIndex } {}
 
     void RenderPassGraph::DependencyLevel::AddNode(Node* node)
     {

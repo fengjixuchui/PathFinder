@@ -462,7 +462,11 @@ namespace PathFinder
                     previousTransitionInfo.Node->ExecutionQueueIndex, transitionInfo.TransitionBarrier.BeforeStates(), transitionInfo.TransitionBarrier.AfterStates()
                 );
 
-                if (isSplitBarrierPossible)
+                // There is no sense in splitting barriers between two adjacent render passes. 
+                // That will only double the amount of barriers without any performance gain.
+                bool currentNodeIsNextToPrevious = node->LocalToQueueExecutionIndex() - previousTransitionInfo.Node->LocalToQueueExecutionIndex() <= 1;
+
+                if (isSplitBarrierPossible && !currentNodeIsNextToPrevious)
                 {
                     auto [beginBarrier, endBarrier] = transitionInfo.TransitionBarrier.Split();
                     collection.AddBarrier(endBarrier);
@@ -565,7 +569,10 @@ namespace PathFinder
 
                 if (!node->NodesToSyncWith().empty() || usesRT)
                 {
-                    currentBatch = &mCommandListBatches[queueIdx].emplace_back();
+                    if (!currentBatch->CommandLists.empty())
+                    {
+                        currentBatch = &mCommandListBatches[queueIdx].emplace_back();
+                    }
 
                     for (const RenderPassGraph::Node* nodeToWait : node->NodesToSyncWith())
                     {

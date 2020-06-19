@@ -5,13 +5,15 @@
 namespace PathFinder
 {
 
-    ResourceScheduler::ResourceScheduler(PipelineResourceStorage* manager, RenderPassUtilityProvider* utilityProvider)
-        : mResourceStorage{ manager }, mUtilityProvider{ utilityProvider } {}
+    ResourceScheduler::ResourceScheduler(PipelineResourceStorage* manager, RenderPassUtilityProvider* utilityProvider, RenderPassGraph* passGraph)
+        : mResourceStorage{ manager }, mUtilityProvider{ utilityProvider }, mRenderPassGraph{ passGraph } {}
 
     void ResourceScheduler::NewRenderTarget(Foundation::Name resourceName, std::optional<NewTextureProperties> properties)
     {
         NewTextureProperties props = FillMissingFields(properties);
         mCurrentlySchedulingPassNode->AddWriteDependency(resourceName, 1);
+
+        bool canBeReadAcrossFrames = EnumMaskBitSet(properties->Flags, ReadFlags::CrossFrameRead);
 
         HAL::ResourceFormat::FormatVariant format = *props.ShaderVisibleFormat;
         if (props.TypelessFormat) format = *props.TypelessFormat;
@@ -19,7 +21,8 @@ namespace PathFinder
         mResourceStorage->QueueTexturesAllocationIfNeeded(
             resourceName, format, *props.Kind, *props.Dimensions, *props.ClearValues, props.MipCount, 
 
-            [typelessFormat = props.TypelessFormat,
+            [canBeReadAcrossFrames,
+            typelessFormat = props.TypelessFormat,
             shaderVisibleFormat = props.ShaderVisibleFormat, 
             passName = mCurrentlySchedulingPassNode->PassMetadata().Name]
             (PipelineResourceSchedulingInfo& schedulingInfo)
@@ -28,6 +31,8 @@ namespace PathFinder
                 passInfo.SubresourceInfos[0] = PipelineResourceSchedulingInfo::SubresourceInfo{};
                 passInfo.SubresourceInfos[0]->SetTextureRTRequested();
                 passInfo.SubresourceInfos[0]->RequestedState = HAL::ResourceState::RenderTarget;
+
+                schedulingInfo.CanBeAliased = !canBeReadAcrossFrames;
 
                 if (typelessFormat)
                 {
@@ -42,16 +47,23 @@ namespace PathFinder
         NewDepthStencilProperties props = FillMissingFields(properties);
         mCurrentlySchedulingPassNode->AddWriteDependency(resourceName, 1);
 
+        bool canBeReadAcrossFrames = EnumMaskBitSet(properties->Flags, ReadFlags::CrossFrameRead);
+
         HAL::DepthStencilClearValue clearValue{ 1.0, 0 };
 
         mResourceStorage->QueueTexturesAllocationIfNeeded(
             resourceName, *props.Format, HAL::TextureKind::Texture2D, *props.Dimensions, clearValue, props.MipCount,
-            [passName = mCurrentlySchedulingPassNode->PassMetadata().Name](PipelineResourceSchedulingInfo& schedulingInfo)
+
+            [canBeReadAcrossFrames,
+            passName = mCurrentlySchedulingPassNode->PassMetadata().Name]
+            (PipelineResourceSchedulingInfo& schedulingInfo)
             {
                 PipelineResourceSchedulingInfo::PassInfo& passInfo = schedulingInfo.AllocateInfoForPass(passName);
                 passInfo.SubresourceInfos[0] = PipelineResourceSchedulingInfo::SubresourceInfo{};
                 passInfo.SubresourceInfos[0]->SetTextureDSRequested();
                 passInfo.SubresourceInfos[0]->RequestedState = HAL::ResourceState::DepthWrite;
+
+                schedulingInfo.CanBeAliased = !canBeReadAcrossFrames;
             }
         );
     }
@@ -61,13 +73,16 @@ namespace PathFinder
         NewTextureProperties props = FillMissingFields(properties);
         mCurrentlySchedulingPassNode->AddWriteDependency(resourceName, 1);
 
+        bool canBeReadAcrossFrames = EnumMaskBitSet(properties->Flags, ReadFlags::CrossFrameRead);
+
         HAL::ResourceFormat::FormatVariant format = *props.ShaderVisibleFormat;
         if (props.TypelessFormat) format = *props.TypelessFormat;
 
         mResourceStorage->QueueTexturesAllocationIfNeeded(
             resourceName, format, *props.Kind, *props.Dimensions, *props.ClearValues, props.MipCount,
 
-            [typelessFormat = props.TypelessFormat,
+            [canBeReadAcrossFrames,
+            typelessFormat = props.TypelessFormat,
             shaderVisibleFormat = props.ShaderVisibleFormat,
             passName = mCurrentlySchedulingPassNode->PassMetadata().Name]
             (PipelineResourceSchedulingInfo& schedulingInfo)
@@ -76,6 +91,8 @@ namespace PathFinder
                 passInfo.SubresourceInfos[0] = PipelineResourceSchedulingInfo::SubresourceInfo{};
                 passInfo.SubresourceInfos[0]->SetTextureUARequested();
                 passInfo.SubresourceInfos[0]->RequestedState = HAL::ResourceState::UnorderedAccess;
+
+                schedulingInfo.CanBeAliased = !canBeReadAcrossFrames;
 
                 if (typelessFormat)
                 {
@@ -126,19 +143,12 @@ namespace PathFinder
         });
     }
 
-    void ResourceScheduler::ReadTexture(Foundation::Name resourceName, const MipList& mips, std::optional<HAL::ColorFormat> concreteFormat, ReadFlags flags)
+    void ResourceScheduler::ReadTexture(Foundation::Name resourceName, const MipList& mips, std::optional<HAL::ColorFormat> concreteFormat)
     {
-        bool crossFrameRead = EnumMaskBitSet(flags, ReadFlags::CrossFrameRead);
-
-        if (!crossFrameRead)
-        {
-            // Resources read across frames will introduce circular dependencies that we don't want
-            mCurrentlySchedulingPassNode->AddReadDependency(resourceName, mips);
-        }
+        mCurrentlySchedulingPassNode->AddReadDependency(resourceName, mips);
         
         mResourceStorage->QueueResourceUsage(resourceName,
-            [crossFrameRead,
-            mips,
+            [mips,
             concreteFormat, 
             passName = mCurrentlySchedulingPassNode->PassMetadata().Name]
         (PipelineResourceSchedulingInfo& schedulingInfo)
@@ -146,14 +156,6 @@ namespace PathFinder
             bool isTypeless = std::holds_alternative<HAL::TypelessColorFormat>(*schedulingInfo.ResourceFormat().DataType());
 
             assert_format(concreteFormat || !isTypeless, "Redefinition of texture format is not allowed");
-            assert_format(!concreteFormat || isTypeless, "Texture is typeless and concrete color format was not provided");
-
-            if (crossFrameRead)
-            {
-                // Resources read across frames cannot be aliased
-                // because their memory needs to be preserved beyond frame end
-                schedulingInfo.CanBeAliased = false;
-            }
 
             for (auto mipLevel : mips)
             {

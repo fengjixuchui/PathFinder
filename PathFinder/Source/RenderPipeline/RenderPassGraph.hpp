@@ -10,6 +10,7 @@
 #include <unordered_map>
 #include <list>
 #include <functional>
+#include <stack>
 
 namespace PathFinder
 {
@@ -28,6 +29,9 @@ namespace PathFinder
             using QueueIndex = uint64_t;
 
             Node(const RenderPassMetadata& passMetadata, WriteDependencyRegistry* writeDependencyRegistry);
+
+            bool operator==(const Node& that) const;
+            bool operator!=(const Node& that) const;
 
             void AddReadDependency(Foundation::Name resourceName, uint32_t subresourceCount);
             void AddReadDependency(Foundation::Name resourceName, uint32_t firstSubresourceIndex, uint32_t lastSubresourceIndex);
@@ -86,8 +90,6 @@ namespace PathFinder
             using NodeList = std::list<Node*>;
             using NodeIterator = NodeList::iterator;
 
-            DependencyLevel(uint64_t levelIndex);
-
         private:
             void AddNode(Node* node);
             Node* RemoveNode(NodeIterator it);
@@ -109,7 +111,7 @@ namespace PathFinder
             inline auto LevelIndex() const { return mLevelIndex; }
         };
 
-        using NodeList = std::list<Node>;
+        using NodeList = std::vector<Node>;
         using NodeListIterator = NodeList::iterator;
         using ResourceUsageTimeline = std::pair<uint64_t, uint64_t>;
         using ResourceUsageTimelines = std::unordered_map<Foundation::Name, ResourceUsageTimeline>;
@@ -132,13 +134,23 @@ namespace PathFinder
         using OrderedNodeList = std::vector<Node*>;
         using RenderPassRegistry = std::unordered_set<Foundation::Name>;
         using QueueNodeCounters = std::unordered_map<uint64_t, uint64_t>;
+        using AdjacencyLists = std::vector<std::vector<uint64_t>>;
+
+        enum class NodeMark
+        {
+            Temporary, Permanent
+        };
 
         void EnsureRenderPassUniqueness(Foundation::Name passName);
+        void BuildAdjacencyLists();
+        void DepthFirstSearch(uint64_t nodeIndex, std::vector<bool>& visited, std::vector<bool>& onStack, bool& isCyclic);
+        void TopologicalSort();
         void BuildDependencyLevels();
         void FinalizeDependencyLevels();
         void CullRedundantSynchronizations();
 
         NodeList mPassNodes;
+        AdjacencyLists mAdjacencyLists;
         DependencyLevelList mDependencyLevels;
 
         // In order to avoid any unambiguity in graph nodes execution order

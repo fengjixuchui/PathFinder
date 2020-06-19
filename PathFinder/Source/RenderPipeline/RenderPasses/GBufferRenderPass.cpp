@@ -75,6 +75,9 @@ namespace PathFinder
         scheduler->NewRenderTarget(ResourceNames::GBufferViewDepth[0], viewDepthProperties);
         scheduler->NewRenderTarget(ResourceNames::GBufferViewDepth[1], viewDepthProperties);
         scheduler->NewDepthStencil(ResourceNames::GBufferDepthStencil);
+
+        // DEBUG
+        //scheduler->ReadTexture(ResourceNames::ShadingAnalyticOutput);
     }  
 
     void GBufferRenderPass::Render(RenderContext<RenderPassContentMediator>* context) 

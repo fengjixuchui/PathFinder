@@ -32,8 +32,9 @@ namespace PathFinder
     { 
         ResourceScheduler::NewTextureProperties outputProperties{};
         outputProperties.MipCount = 5;
+        outputProperties.Flags = ResourceScheduler::ReadFlags::CrossFrameRead;
 
-        scheduler->NewTexture(ResourceNames::ShadingAnalyticOutput);
+        scheduler->NewTexture(ResourceNames::ShadingAnalyticOutput, outputProperties);
         scheduler->NewTexture(ResourceNames::StochasticShadowedShadingOutput, outputProperties);
         scheduler->NewTexture(ResourceNames::StochasticUnshadowedShadingOutput, outputProperties);
         

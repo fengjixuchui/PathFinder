@@ -34,8 +34,8 @@ namespace PathFinder
         /*      scheduler->ReadTexture({ ResourceNames::GBufferViewDepth, previousFrameIndex });
               scheduler->ReadTexture({ ResourceNames::GBufferViewDepth, frameIndex });
               scheduler->ReadTexture({ ResourceNames::DenoiserReprojectedFramesCount, previousFrameIndex });*/
-        scheduler->ReadTexture(ResourceNames::StochasticShadowedShadingDenoised, {}, std::nullopt, ResourceScheduler::ReadFlags::CrossFrameRead);
-        scheduler->ReadTexture(ResourceNames::StochasticUnshadowedShadingDenoised, {}, std::nullopt, ResourceScheduler::ReadFlags::CrossFrameRead);
+        scheduler->ReadTexture(ResourceNames::StochasticShadowedShadingDenoised);
+        scheduler->ReadTexture(ResourceNames::StochasticUnshadowedShadingDenoised);
     }
      
     void DenoiserReprojectionRenderPass::Render(RenderContext<RenderPassContentMediator>* context)

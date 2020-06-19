@@ -23,7 +23,7 @@ namespace PathFinder
 
         enum class ReadFlags : uint32_t
         {
-            None = 0, CrossFrameRead = 1
+            None = 0, CrossFrameRead = 1 << 0
         };
 
         struct NewTextureProperties
@@ -34,10 +34,11 @@ namespace PathFinder
                 std::optional<Geometry::Dimensions> dimensions = std::nullopt,
                 std::optional<HAL::TypelessColorFormat> typelessFormat = std::nullopt,
                 std::optional<HAL::ColorClearValue> clearValues = std::nullopt,
-                uint8_t mipCount = 1)
+                uint8_t mipCount = 1,
+                ReadFlags readFlags = ReadFlags::None)
                 : 
                 TypelessFormat{ typelessFormat }, ShaderVisibleFormat{ shaderVisibleFormat }, 
-                Kind{ kind }, Dimensions{ dimensions }, ClearValues{ clearValues }, MipCount{ mipCount } {}
+                Kind{ kind }, Dimensions{ dimensions }, ClearValues{ clearValues }, MipCount{ mipCount }, Flags{ readFlags } {}
 
             std::optional<HAL::TypelessColorFormat> TypelessFormat;
             std::optional<HAL::ColorFormat> ShaderVisibleFormat;
@@ -45,6 +46,7 @@ namespace PathFinder
             std::optional<Geometry::Dimensions> Dimensions;
             std::optional<HAL::ColorClearValue> ClearValues;
             uint8_t MipCount;
+            ReadFlags Flags;
         };
 
         struct NewDepthStencilProperties
@@ -52,28 +54,31 @@ namespace PathFinder
             NewDepthStencilProperties(
                 std::optional<HAL::DepthStencilFormat> format = std::nullopt,
                 std::optional<Geometry::Dimensions> dimensions = std::nullopt,
-                uint8_t mipCount = 1)
+                uint8_t mipCount = 1,
+                ReadFlags readFlags = ReadFlags::None)
                 : 
-                Format{ format }, Dimensions{ dimensions }, MipCount{ mipCount } {}
+                Format{ format }, Dimensions{ dimensions }, MipCount{ mipCount }, Flags{ readFlags } {}
 
             std::optional<HAL::DepthStencilFormat> Format;
             std::optional<Geometry::Dimensions> Dimensions;
             uint8_t MipCount;
+            ReadFlags Flags;
         };
 
         template <class T>
         struct NewBufferProperties
         {
-            NewBufferProperties(uint64_t capacity = 1, uint64_t perElementAlignment = 1)
-                : Capacity{ capacity }, PerElementAlignment{ perElementAlignment } {}
+            NewBufferProperties(uint64_t capacity = 1, uint64_t perElementAlignment = 1, ReadFlags readFlags = ReadFlags::None)
+                : Capacity{ capacity }, PerElementAlignment{ perElementAlignment }, Flags{ readFlags } {}
 
             uint64_t Capacity;
             uint64_t PerElementAlignment;
+            ReadFlags Flags;
         };
 
         struct NewByteBufferProperties : public NewBufferProperties<uint8_t> {};
 
-        ResourceScheduler(PipelineResourceStorage* manager, RenderPassUtilityProvider* utilityProvider);
+        ResourceScheduler(PipelineResourceStorage* manager, RenderPassUtilityProvider* utilityProvider, RenderPassGraph* passGraph);
 
         // Allocates new render target texture (Write Only)
         void NewRenderTarget(Foundation::Name resourceName, std::optional<NewTextureProperties> properties = std::nullopt);
@@ -91,7 +96,7 @@ namespace PathFinder
         void UseDepthStencil(Foundation::Name resourceName);
 
         // Read any previously created texture as a Shader Resource (Read Only)
-        void ReadTexture(Foundation::Name resourceName, const MipList& mips = { 0 }, std::optional<HAL::ColorFormat> concreteFormat = std::nullopt, ReadFlags flags = ReadFlags::None);
+        void ReadTexture(Foundation::Name resourceName, const MipList& mips = { 0 }, std::optional<HAL::ColorFormat> concreteFormat = std::nullopt);
 
         // Access a previously created texture as an Unordered Access resource (Write)
         void WriteTexture(Foundation::Name resourceName, const MipList& mips = { 0 }, std::optional<HAL::ColorFormat> concreteFormat = std::nullopt);
@@ -126,6 +131,7 @@ namespace PathFinder
         RenderPassGraph::Node* mCurrentlySchedulingPassNode = nullptr;
         PipelineResourceStorage* mResourceStorage = nullptr;
         RenderPassUtilityProvider* mUtilityProvider = nullptr;
+        RenderPassGraph* mRenderPassGraph = nullptr;
 
     public:
         inline const RenderSurfaceDescription& DefaultRenderSurfaceDesc() const { return mUtilityProvider->DefaultRenderSurfaceDescription; }

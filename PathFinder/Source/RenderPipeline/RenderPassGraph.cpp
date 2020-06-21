@@ -174,27 +174,49 @@ namespace PathFinder
 
     void RenderPassGraph::BuildDependencyLevels()
     {
-        std::vector<uint64_t> indegreeLevels(mOrderedNodes.size(), 0);
-        uint64_t indegreeLevelCount = 0;
+        constexpr auto NoDistance = std::numeric_limits<int64_t>::lowest();
+        std::vector<int64_t> longestDistances(mOrderedNodes.size(), NoDistance);
 
-        for (const std::vector<uint64_t>& adjacencyList : mAdjacencyLists)
+        // Find root nodes to start longest path search from
+        for (auto nodeIndex = 0; nodeIndex < mOrderedNodes.size(); ++nodeIndex)
         {
-            for (uint64_t adjacendNodeIndex : adjacencyList)
+            if (!mAdjacencyLists[nodeIndex].empty())
             {
-                indegreeLevels[adjacendNodeIndex]++;
-                indegreeLevelCount = std::max(indegreeLevelCount, indegreeLevels[adjacendNodeIndex] + 1);
+                longestDistances[nodeIndex] = 0;
             }
         }
 
-        mDetectedQueueCount = 1;
-        mDependencyLevels.resize(indegreeLevelCount);
+        uint64_t dependencyLevelCount = 0;
 
+        // Perform longest node distance search
+        for (auto nodeIndex = 0; nodeIndex < mOrderedNodes.size(); ++nodeIndex)
+        {
+            if (longestDistances[nodeIndex] == NoDistance)
+            {
+                continue;
+            }
+
+            for (uint64_t adjacentNodeIndex : mAdjacencyLists[nodeIndex])
+            {
+                if (longestDistances[adjacentNodeIndex] < longestDistances[nodeIndex] + 1)
+                {
+                    int64_t newLongestDistance = longestDistances[nodeIndex] + 1;
+                    longestDistances[adjacentNodeIndex] = newLongestDistance;
+                    dependencyLevelCount = std::max(uint64_t(newLongestDistance + 1), dependencyLevelCount);
+                }
+            }
+        }
+
+        mDependencyLevels.resize(dependencyLevelCount);
+        mDetectedQueueCount = 1;
+
+        // Dispatch nodes to corresponding dependency levels
         for (auto nodeIndex = 0; nodeIndex < mOrderedNodes.size(); ++nodeIndex)
         {
             Node* node = mOrderedNodes[nodeIndex];
-            uint64_t indegree = indegreeLevels[nodeIndex];
-            DependencyLevel& dependencyLevel = mDependencyLevels[indegree];
-            dependencyLevel.mLevelIndex = indegree;
+            uint64_t levelIndex = longestDistances[nodeIndex] == NoDistance ? 0 : longestDistances[nodeIndex];
+            DependencyLevel& dependencyLevel = mDependencyLevels[levelIndex];
+            dependencyLevel.mLevelIndex = levelIndex;
             dependencyLevel.AddNode(node);
             mDetectedQueueCount = std::max(mDetectedQueueCount, node->ExecutionQueueIndex + 1);
         }

@@ -113,9 +113,6 @@ int main(int argc, char** argv)
     //engine.AddRenderPass(backBufferOutputPass.get());
     //engine.AddRenderPass(uiPass.get());
 
-    //renderPassGraph.AddPass(PathFinder::ShadowsRenderPass{});
-    //renderPassGraph.AddPass(blurPass.get());
-
    /* auto sphereLight0 = scene.EmplaceSphericalLight();
     sphereLight0->SetRadius(7);
     sphereLight0->SetPosition({ 2.5, 0.0, 0.0 });

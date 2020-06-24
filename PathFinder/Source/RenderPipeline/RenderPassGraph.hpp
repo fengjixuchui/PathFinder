@@ -57,6 +57,7 @@ namespace PathFinder
             uint64_t mDependencyLevelIndex = 0;
             uint64_t mLocalToDependencyLevelExecutionIndex = 0;
             uint64_t mLocalToQueueExecutionIndex = 0;
+            uint64_t mIndexInUnorderedList = 0;
 
             RenderPassMetadata mPassMetadata;
             WriteDependencyRegistry* mWriteDependencyRegistry = nullptr;
@@ -161,14 +162,15 @@ namespace PathFinder
         ResourceUsageTimelines mResourceUsageTimelines;
         RenderPassRegistry mRenderPassRegistry;
         QueueNodeCounters mQueueNodeCounters;
-        OrderedNodeList mOrderedNodes;
+        OrderedNodeList mTopologicallySortedNodes;
+        OrderedNodeList mNodesInGlobalExecutionOrder;
         const Node* mFirstNodeThatUsesRayTracing = nullptr;
         uint64_t mDetectedQueueCount = 1;
 
     public:
-        inline const auto& OrderedNodes() const { return mOrderedNodes; }
-        inline const auto& RawNodes() const { return mPassNodes; }
-        inline auto& RawNodes() { return mPassNodes; }
+        inline const auto& NodesInGlobalExecutionOrder() const { return mNodesInGlobalExecutionOrder; }
+        inline const auto& Nodes() const { return mPassNodes; }
+        inline auto& Nodes() { return mPassNodes; }
         inline const auto& DependencyLevels() const { return mDependencyLevels; }
         inline const Node* FirstNodeThatUsesRayTracing() const { return mFirstNodeThatUsesRayTracing; }
         inline auto DetectedQueueCount() const { return mDetectedQueueCount; }

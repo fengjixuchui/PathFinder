@@ -50,6 +50,7 @@ namespace PathFinder
 
         const HAL::RTDescriptor* GetRenderTargetDescriptor(Foundation::Name resourceName, Foundation::Name passName, uint64_t mipIndex = 0);
         const HAL::DSDescriptor* GetDepthStencilDescriptor(Foundation::Name resourceName, Foundation::Name passName);
+        bool HasMemoryLayoutChange() const;
         
         void CreatePerPassData();
 
@@ -132,7 +133,8 @@ namespace PathFinder
 
         std::unordered_map<PassName, PipelineResourceStoragePass> mPerPassData;
         std::vector<std::function<void()>> mAllocationActions;
-        std::vector<std::pair<SchedulingInfoConfigurator, Foundation::Name>> mSchedulingInfoConfiguators;
+        std::vector<std::pair<SchedulingInfoConfigurator, Foundation::Name>> mSchedulingInfoCreationConfiguators;
+        std::vector<std::pair<SchedulingInfoConfigurator, Foundation::Name>> mSchedulingInfoUsageConfiguators;
 
         // Two sets of resources: current and previous frame
         std::pair<ResourceMap, ResourceMap> mPerResourceData;
@@ -146,6 +148,8 @@ namespace PathFinder
 
         // Transitions for resources scheduled for readback
         HAL::ResourceBarrierCollection mReadbackBarriers;
+
+        bool mMemoryLayoutChanged = false;
     };
 
 }

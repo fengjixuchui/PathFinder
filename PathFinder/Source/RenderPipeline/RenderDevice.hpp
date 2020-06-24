@@ -173,14 +173,14 @@ namespace PathFinder
         // Keep list of separate barriers gathered for dependency level so we could cull them, if conditions are met, when command list batches are determined
         std::vector<std::vector<SubresourceTransitionInfo>> mDependencyLevelTransitionBarriers;
 
-        // Gather aliasing barriers required by each node in a dependency level
-        std::vector<std::vector<HAL::ResourceAliasingBarrier>> mDependencyLevelAliasingBarriers;
-
         // Keep track of queues inside a graph dependency layer that require transition rerouting
         std::unordered_set<RenderPassGraph::Node::QueueIndex> mDependencyLevelQueuesThatRequireTransitionRerouting;
 
         // Collect begin barriers for passes that may issue them to be applied in batches after all nodes are processed
         std::vector<HAL::ResourceBarrierCollection> mPerNodeBeginBarriers;
+
+        // Collect aliasing barriers for passes
+        std::vector<HAL::ResourceBarrierCollection> mPerNodeAliasingBarriers;
 
     public:
         inline HAL::GraphicsCommandQueue& GraphicsCommandQueue() { return mGraphicsQueue; }

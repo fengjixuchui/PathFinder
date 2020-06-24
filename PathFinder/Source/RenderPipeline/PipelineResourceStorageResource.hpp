@@ -17,8 +17,19 @@ namespace PathFinder
         public:
             bool operator==(const DiffEntry& that) const;
 
+            // Compare by name to detect new or deleted resources
             Foundation::Name ResourceName;
+
+            // Compare by aliasing capability 
+            bool CanBeAliased = true;
+
+            // Compare by resource states because new state combination will require reallocation
+            HAL::ResourceState ExpectedStates = HAL::ResourceState::Common;
+
+            // Compare by total occupied memory
             uint64_t MemoryFootprint = 0;
+
+            // Compare by lifetimes when aliasing is possible 
             uint64_t LifetimeStart = 0;
             uint64_t LifetimeEnd = 0;
         };

@@ -20,29 +20,14 @@ namespace PathFinder
         class SubresourceInfo
         {
         public:
-            using RequestedAccessFlag = uint16_t;
+            enum class AccessFlag
+            {
+                TextureRT, TextureDS, TextureSR, TextureUA, BufferSR, BufferUA, BufferCB
+            };
 
             HAL::ResourceState RequestedState = HAL::ResourceState::Common;
             std::optional<HAL::ColorFormat> ShaderVisibleFormat;
-
-            void SetTextureRTRequested() { mAccessFlag = 1 << 0; }
-            void SetTextureDSRequested() { mAccessFlag = 1 << 1; }
-            void SetTextureSRRequested() { mAccessFlag = 1 << 2; }
-            void SetTextureUARequested() { mAccessFlag = 1 << 3; }
-            void SetBufferCBRequested() { mAccessFlag = 1 << 4; }
-            void SetBufferSRRequested() { mAccessFlag = 1 << 5; }
-            void SetBufferUARequested() { mAccessFlag = 1 << 6; }
-
-            bool IsTextureRTRequested() const { return mAccessFlag & 1 << 0; }
-            bool IsTextureDSRequested() const { return mAccessFlag & 1 << 1; }
-            bool IsTextureSRRequested() const { return mAccessFlag & 1 << 2; }
-            bool IsTextureUARequested() const { return mAccessFlag & 1 << 3; }
-            bool IsBufferCBRequested() const { return mAccessFlag & 1 << 4; }
-            bool IsBufferSRRequested() const { return mAccessFlag & 1 << 5; }
-            bool IsBufferUARequested() const { return mAccessFlag & 1 << 6; }
-
-        private:
-            RequestedAccessFlag mAccessFlag;
+            AccessFlag AccessValidationFlag;
         };
 
         struct PassInfo
@@ -54,10 +39,19 @@ namespace PathFinder
 
         PipelineResourceSchedulingInfo(Foundation::Name resourceName, const HAL::ResourceFormat& format);
 
+        void AddExpectedStates(HAL::ResourceState states);
         void FinishScheduling();
         const PassInfo* GetInfoForPass(Foundation::Name passName) const;
         PassInfo* GetInfoForPass(Foundation::Name passName);
-        PassInfo& AllocateInfoForPass(Foundation::Name passName);
+
+        void SetSubresourceInfo(
+            Foundation::Name passName, 
+            uint64_t subresourceIndex, 
+            HAL::ResourceState state, 
+            SubresourceInfo::AccessFlag accessFlag,
+            std::optional<HAL::ColorFormat> shaderVisibleFormat = std::nullopt
+        );
+
         HAL::ResourceState GetSubresourceCombinedReadStates(uint64_t subresourceIndex) const;
         HAL::ResourceState GetSubresourceWriteState(uint64_t subresourceIndex) const;
 

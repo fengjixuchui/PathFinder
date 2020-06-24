@@ -70,7 +70,7 @@ namespace PathFinder
 
         // Store data in CPU storage 
         const uint8_t* data = reinterpret_cast<const uint8_t*>(&constants);
-        passData->PassConstantData.insert(passData->PassConstantData.begin() + passData->PassConstantBufferMemoryOffset, data, data + sizeof(Constants));
+        std::copy(data, data + sizeof(Constants), passData->PassConstantData.begin() + passData->PassConstantBufferMemoryOffset);
     }
 
     template <class BufferDataT>
@@ -113,7 +113,7 @@ namespace PathFinder
         };
 
         mAllocationActions.push_back(allocationAction);
-        mSchedulingInfoConfiguators.emplace_back(siConfigurator, resourceName);
+        mSchedulingInfoCreationConfiguators.emplace_back(siConfigurator, resourceName);
     }
 
 }

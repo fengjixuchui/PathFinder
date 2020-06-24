@@ -64,9 +64,14 @@ namespace PathFinder
         return texture->GetDSDescriptor();
     }
 
+    bool PipelineResourceStorage::HasMemoryLayoutChange() const
+    {
+        return mMemoryLayoutChanged;
+    }
+
     void PipelineResourceStorage::CreatePerPassData()
     {
-        for (const RenderPassGraph::Node& passNode : mPassExecutionGraph->RawNodes())
+        for (const RenderPassGraph::Node& passNode : mPassExecutionGraph->Nodes())
         {
             CreatePerPassData(passNode.PassMetadata().Name);
         }
@@ -79,7 +84,8 @@ namespace PathFinder
         mPreviousFrameResources->clear();
         mPreviousFrameDiffEntries->clear();
         mAllocationActions.clear();
-        mSchedulingInfoConfiguators.clear();
+        mSchedulingInfoCreationConfiguators.clear();
+        mSchedulingInfoUsageConfiguators.clear();
 
         std::swap(mPreviousFrameDiffEntries, mCurrentFrameDiffEntries);
         std::swap(mPreviousFrameResources, mCurrentFrameResources);
@@ -90,21 +96,24 @@ namespace PathFinder
         FinalizeSchedulingInfo();
 
         bool memoryValid = TransferPreviousFrameResources();
+        mMemoryLayoutChanged = !memoryValid;
 
-        if (!memoryValid)
+        if (memoryValid)
         {
-            // Re-alias memory, then reallocate resources only if memory was invalidated
-            // which can happen on first run or when resource properties were changed by the user.
-            //
-            if (!mRTDSMemoryAliaser.IsEmpty()) mRTDSHeap = std::make_unique<HAL::Heap>(*mDevice, mRTDSMemoryAliaser.Alias(), HAL::HeapAliasingGroup::RTDSTextures);
-            if (!mNonRTDSMemoryAliaser.IsEmpty()) mNonRTDSHeap = std::make_unique<HAL::Heap>(*mDevice, mNonRTDSMemoryAliaser.Alias(), HAL::HeapAliasingGroup::NonRTDSTextures);
-            if (!mBufferMemoryAliaser.IsEmpty()) mBufferHeap = std::make_unique<HAL::Heap>(*mDevice, mBufferMemoryAliaser.Alias(), HAL::HeapAliasingGroup::Buffers);
-            if (!mUniversalMemoryAliaser.IsEmpty()) mUniversalHeap = std::make_unique<HAL::Heap>(*mDevice, mUniversalMemoryAliaser.Alias(), HAL::HeapAliasingGroup::Universal);
+            return;
+        }
 
-            for (auto& allocationAction : mAllocationActions)
-            {
-                allocationAction();
-            }
+        // Re-alias memory, then reallocate resources only if memory was invalidated
+        // which can happen on first run or when resource properties were changed by the user.
+        //
+        if (!mRTDSMemoryAliaser.IsEmpty()) mRTDSHeap = std::make_unique<HAL::Heap>(*mDevice, mRTDSMemoryAliaser.Alias(), HAL::HeapAliasingGroup::RTDSTextures);
+        if (!mNonRTDSMemoryAliaser.IsEmpty()) mNonRTDSHeap = std::make_unique<HAL::Heap>(*mDevice, mNonRTDSMemoryAliaser.Alias(), HAL::HeapAliasingGroup::NonRTDSTextures);
+        if (!mBufferMemoryAliaser.IsEmpty()) mBufferHeap = std::make_unique<HAL::Heap>(*mDevice, mBufferMemoryAliaser.Alias(), HAL::HeapAliasingGroup::Buffers);
+        if (!mUniversalMemoryAliaser.IsEmpty()) mUniversalHeap = std::make_unique<HAL::Heap>(*mDevice, mUniversalMemoryAliaser.Alias(), HAL::HeapAliasingGroup::Universal);
+
+        for (auto& allocationAction : mAllocationActions)
+        {
+            allocationAction();
         }
     }
 
@@ -152,13 +161,12 @@ namespace PathFinder
         };
 
         mAllocationActions.push_back(allocationAction);
-        mSchedulingInfoConfiguators.emplace_back(siConfigurator, resourceName);
+        mSchedulingInfoCreationConfiguators.emplace_back(siConfigurator, resourceName);
     }
 
     void PipelineResourceStorage::QueueResourceUsage(ResourceName resourceName, const SchedulingInfoConfigurator& siConfigurator)
     {
-        PipelineResourceStorageResource* resourceObjects = GetPerResourceData(resourceName);
-        mSchedulingInfoConfiguators.emplace_back(siConfigurator, resourceName);
+        mSchedulingInfoUsageConfiguators.emplace_back(siConfigurator, resourceName);
     }
 
     PipelineResourceStoragePass* PipelineResourceStorage::GetPerPassData(PassName name)
@@ -217,15 +225,30 @@ namespace PathFinder
     }
 
     bool PipelineResourceStorage::TransferPreviousFrameResources()
-{
+    {
         for (auto& [resourceName, resourceData] : *mCurrentFrameResources)
         {
-            const RenderPassGraph::ResourceUsageTimeline& usageTimeline = mPassExecutionGraph->GetResourceUsageTimeline(resourceName);
+            // Accumulate expected states for resource from previous frame to avoid reallocations 
+            // when resource's states ping-pong between frames or change frequently for other reasons.
+            auto prevResourceDataIt = mPreviousFrameResources->find(resourceName);
+            if (prevResourceDataIt != mPreviousFrameResources->end())
+            {
+                resourceData.SchedulingInfo.AddExpectedStates(prevResourceDataIt->second.SchedulingInfo.ExpectedStates());
+            }
+
             PipelineResourceStorageResource::DiffEntry diffEntry = resourceData.GetDiffEntry();
+            const RenderPassGraph::ResourceUsageTimeline& usageTimeline = mPassExecutionGraph->GetResourceUsageTimeline(resourceName);
+
             diffEntry.LifetimeStart = usageTimeline.first;
             diffEntry.LifetimeEnd = usageTimeline.second;
             mCurrentFrameDiffEntries->push_back(diffEntry);
         }
+
+        // Make diff independent from order by sorting first
+        std::sort(mCurrentFrameDiffEntries->begin(), mCurrentFrameDiffEntries->end(), [](auto& first, auto& second)
+        {
+            return first.ResourceName.ToId() < second.ResourceName.ToId();
+        });
 
         dtl::Diff<PipelineResourceStorageResource::DiffEntry> diff{ *mPreviousFrameDiffEntries, *mCurrentFrameDiffEntries };
 
@@ -274,9 +297,16 @@ namespace PathFinder
         mBufferMemoryAliaser = { mPassExecutionGraph };
         mUniversalMemoryAliaser = { mPassExecutionGraph };
 
-        for (auto& [configurator, resourceName] : mSchedulingInfoConfiguators)
+        for (auto& [configurator, resourceName] : mSchedulingInfoCreationConfiguators)
         {
             PipelineResourceStorageResource* resourceData = GetPerResourceData(resourceName);
+            configurator(resourceData->SchedulingInfo);
+        }
+
+        for (auto& [configurator, resourceName] : mSchedulingInfoUsageConfiguators)
+        {
+            PipelineResourceStorageResource* resourceData = GetPerResourceData(resourceName);
+            assert_format(resourceData, "Trying to use a resource that wasn't created: ", resourceName.ToString());
             configurator(resourceData->SchedulingInfo);
         }
 
@@ -284,23 +314,25 @@ namespace PathFinder
         {
             resourceData.SchedulingInfo.FinishScheduling();
 
-            if (resourceData.SchedulingInfo.CanBeAliased)
+            if (!resourceData.SchedulingInfo.CanBeAliased)
             {
-                switch (resourceData.SchedulingInfo.ResourceFormat().ResourceAliasingGroup())
-                {
-                case HAL::HeapAliasingGroup::RTDSTextures:
-                    mRTDSMemoryAliaser.AddSchedulingInfo(&resourceData.SchedulingInfo);
-                    break;
-                case HAL::HeapAliasingGroup::NonRTDSTextures:
-                    mNonRTDSMemoryAliaser.AddSchedulingInfo(&resourceData.SchedulingInfo);
-                    break;
-                case HAL::HeapAliasingGroup::Buffers:
-                    mBufferMemoryAliaser.AddSchedulingInfo(&resourceData.SchedulingInfo);
-                    break;
-                case HAL::HeapAliasingGroup::Universal:
-                    mUniversalMemoryAliaser.AddSchedulingInfo(&resourceData.SchedulingInfo);
-                    break;
-                }
+                continue;
+            }
+            
+            switch (resourceData.SchedulingInfo.ResourceFormat().ResourceAliasingGroup())
+            {
+            case HAL::HeapAliasingGroup::RTDSTextures:
+                mRTDSMemoryAliaser.AddSchedulingInfo(&resourceData.SchedulingInfo);
+                break;
+            case HAL::HeapAliasingGroup::NonRTDSTextures:
+                mNonRTDSMemoryAliaser.AddSchedulingInfo(&resourceData.SchedulingInfo);
+                break;
+            case HAL::HeapAliasingGroup::Buffers:
+                mBufferMemoryAliaser.AddSchedulingInfo(&resourceData.SchedulingInfo);
+                break;
+            case HAL::HeapAliasingGroup::Universal:
+                mUniversalMemoryAliaser.AddSchedulingInfo(&resourceData.SchedulingInfo);
+                break;
             }
         }
     }

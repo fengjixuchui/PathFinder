@@ -11,9 +11,14 @@ namespace PathFinder
     void ResourceScheduler::NewRenderTarget(Foundation::Name resourceName, std::optional<NewTextureProperties> properties)
     {
         NewTextureProperties props = FillMissingFields(properties);
-        mCurrentlySchedulingPassNode->AddWriteDependency(resourceName, 1);
 
-        bool canBeReadAcrossFrames = EnumMaskBitSet(properties->Flags, ReadFlags::CrossFrameRead);
+        bool willNotWrite = EnumMaskBitSet(properties->Flags, Flags::WillNotWrite);
+        bool canBeReadAcrossFrames = EnumMaskBitSet(properties->Flags, Flags::CrossFrameRead);
+
+        if (!willNotWrite)
+        {
+            mCurrentlySchedulingPassNode->AddWriteDependency(resourceName, 1);
+        }
 
         HAL::ResourceFormat::FormatVariant format = *props.ShaderVisibleFormat;
         if (props.TypelessFormat) format = *props.TypelessFormat;
@@ -22,22 +27,21 @@ namespace PathFinder
             resourceName, format, *props.Kind, *props.Dimensions, *props.ClearValues, props.MipCount, 
 
             [canBeReadAcrossFrames,
+            willNotWrite,
             typelessFormat = props.TypelessFormat,
             shaderVisibleFormat = props.ShaderVisibleFormat, 
             passName = mCurrentlySchedulingPassNode->PassMetadata().Name]
             (PipelineResourceSchedulingInfo& schedulingInfo)
             {
-                PipelineResourceSchedulingInfo::PassInfo& passInfo = schedulingInfo.AllocateInfoForPass(passName);
-                passInfo.SubresourceInfos[0] = PipelineResourceSchedulingInfo::SubresourceInfo{};
-                passInfo.SubresourceInfos[0]->SetTextureRTRequested();
-                passInfo.SubresourceInfos[0]->RequestedState = HAL::ResourceState::RenderTarget;
-
                 schedulingInfo.CanBeAliased = !canBeReadAcrossFrames;
 
-                if (typelessFormat)
-                {
-                    passInfo.SubresourceInfos[0]->ShaderVisibleFormat = shaderVisibleFormat;
-                }
+                schedulingInfo.SetSubresourceInfo(
+                    passName,
+                    0,
+                    HAL::ResourceState::RenderTarget,
+                    PipelineResourceSchedulingInfo::SubresourceInfo::AccessFlag::TextureRT,
+                    typelessFormat ? shaderVisibleFormat : std::nullopt
+                );
             }
         );
     }
@@ -45,9 +49,14 @@ namespace PathFinder
     void ResourceScheduler::NewDepthStencil(Foundation::Name resourceName, std::optional<NewDepthStencilProperties> properties)
     {
         NewDepthStencilProperties props = FillMissingFields(properties);
-        mCurrentlySchedulingPassNode->AddWriteDependency(resourceName, 1);
+        
+        bool willNotWrite = EnumMaskBitSet(properties->Flags, Flags::WillNotWrite);
+        bool canBeReadAcrossFrames = EnumMaskBitSet(properties->Flags, Flags::CrossFrameRead);
 
-        bool canBeReadAcrossFrames = EnumMaskBitSet(properties->Flags, ReadFlags::CrossFrameRead);
+        if (!willNotWrite)
+        {
+            mCurrentlySchedulingPassNode->AddWriteDependency(resourceName, 1);
+        }
 
         HAL::DepthStencilClearValue clearValue{ 1.0, 0 };
 
@@ -55,15 +64,18 @@ namespace PathFinder
             resourceName, *props.Format, HAL::TextureKind::Texture2D, *props.Dimensions, clearValue, props.MipCount,
 
             [canBeReadAcrossFrames,
+            willNotWrite,
             passName = mCurrentlySchedulingPassNode->PassMetadata().Name]
             (PipelineResourceSchedulingInfo& schedulingInfo)
             {
-                PipelineResourceSchedulingInfo::PassInfo& passInfo = schedulingInfo.AllocateInfoForPass(passName);
-                passInfo.SubresourceInfos[0] = PipelineResourceSchedulingInfo::SubresourceInfo{};
-                passInfo.SubresourceInfos[0]->SetTextureDSRequested();
-                passInfo.SubresourceInfos[0]->RequestedState = HAL::ResourceState::DepthWrite;
-
                 schedulingInfo.CanBeAliased = !canBeReadAcrossFrames;
+
+                schedulingInfo.SetSubresourceInfo(
+                    passName,
+                    0,
+                    HAL::ResourceState::DepthWrite,
+                    PipelineResourceSchedulingInfo::SubresourceInfo::AccessFlag::TextureDS
+                );
             }
         );
     }
@@ -71,9 +83,14 @@ namespace PathFinder
     void ResourceScheduler::NewTexture(Foundation::Name resourceName, std::optional<NewTextureProperties> properties)
     {
         NewTextureProperties props = FillMissingFields(properties);
-        mCurrentlySchedulingPassNode->AddWriteDependency(resourceName, 1);
+        
+        bool willNotWrite = EnumMaskBitSet(properties->Flags, Flags::WillNotWrite);
+        bool canBeReadAcrossFrames = EnumMaskBitSet(properties->Flags, Flags::CrossFrameRead);
 
-        bool canBeReadAcrossFrames = EnumMaskBitSet(properties->Flags, ReadFlags::CrossFrameRead);
+        if (!willNotWrite)
+        {
+            mCurrentlySchedulingPassNode->AddWriteDependency(resourceName, 1);
+        }
 
         HAL::ResourceFormat::FormatVariant format = *props.ShaderVisibleFormat;
         if (props.TypelessFormat) format = *props.TypelessFormat;
@@ -87,17 +104,15 @@ namespace PathFinder
             passName = mCurrentlySchedulingPassNode->PassMetadata().Name]
             (PipelineResourceSchedulingInfo& schedulingInfo)
             {
-                PipelineResourceSchedulingInfo::PassInfo& passInfo = schedulingInfo.AllocateInfoForPass(passName);
-                passInfo.SubresourceInfos[0] = PipelineResourceSchedulingInfo::SubresourceInfo{};
-                passInfo.SubresourceInfos[0]->SetTextureUARequested();
-                passInfo.SubresourceInfos[0]->RequestedState = HAL::ResourceState::UnorderedAccess;
-
                 schedulingInfo.CanBeAliased = !canBeReadAcrossFrames;
 
-                if (typelessFormat)
-                {
-                    passInfo.SubresourceInfos[0]->ShaderVisibleFormat = shaderVisibleFormat;
-                }
+                schedulingInfo.SetSubresourceInfo(
+                    passName,
+                    0,
+                    HAL::ResourceState::UnorderedAccess,
+                    PipelineResourceSchedulingInfo::SubresourceInfo::AccessFlag::TextureUA,
+                    typelessFormat ? shaderVisibleFormat : std::nullopt
+                );
             }
         );
     }
@@ -115,15 +130,13 @@ namespace PathFinder
 
             for (auto mipLevel : mips)
             {
-                PipelineResourceSchedulingInfo::PassInfo& passInfo = schedulingInfo.AllocateInfoForPass(passName);
-                passInfo.SubresourceInfos[mipLevel] = PipelineResourceSchedulingInfo::SubresourceInfo{};
-                passInfo.SubresourceInfos[mipLevel]->SetTextureRTRequested();
-                passInfo.SubresourceInfos[mipLevel]->RequestedState = HAL::ResourceState::RenderTarget;
-
-                if (isTypeless)
-                {
-                    passInfo.SubresourceInfos[mipLevel]->ShaderVisibleFormat = concreteFormat;
-                }
+                schedulingInfo.SetSubresourceInfo(
+                    passName,
+                    mipLevel,
+                    HAL::ResourceState::RenderTarget,
+                    PipelineResourceSchedulingInfo::SubresourceInfo::AccessFlag::TextureRT,
+                    isTypeless ? concreteFormat : std::nullopt
+                );
             }
         });
     }
@@ -136,10 +149,12 @@ namespace PathFinder
         {
             assert_format(std::holds_alternative<HAL::DepthStencilFormat>(*schedulingInfo.ResourceFormat().DataType()), "Cannot reuse non-depth-stencil texture");
 
-            PipelineResourceSchedulingInfo::PassInfo& passInfo = schedulingInfo.AllocateInfoForPass(passName);
-            passInfo.SubresourceInfos[0] = PipelineResourceSchedulingInfo::SubresourceInfo{};
-            passInfo.SubresourceInfos[0]->SetTextureDSRequested();
-            passInfo.SubresourceInfos[0]->RequestedState = HAL::ResourceState::DepthWrite;
+            schedulingInfo.SetSubresourceInfo(
+                passName,
+                0,
+                HAL::ResourceState::DepthWrite,
+                PipelineResourceSchedulingInfo::SubresourceInfo::AccessFlag::TextureDS
+            );
         });
     }
 
@@ -159,20 +174,20 @@ namespace PathFinder
 
             for (auto mipLevel : mips)
             {
-                PipelineResourceSchedulingInfo::PassInfo& passInfo = schedulingInfo.AllocateInfoForPass(passName);
-                passInfo.SubresourceInfos[mipLevel] = PipelineResourceSchedulingInfo::SubresourceInfo{};
-                passInfo.SubresourceInfos[mipLevel]->SetTextureSRRequested();
-                passInfo.SubresourceInfos[mipLevel]->RequestedState = HAL::ResourceState::AnyShaderAccess;
+                HAL::ResourceState state = HAL::ResourceState::AnyShaderAccess;
 
                 if (std::holds_alternative<HAL::DepthStencilFormat>(*schedulingInfo.ResourceFormat().DataType()))
                 {
-                    passInfo.SubresourceInfos[mipLevel]->RequestedState |= HAL::ResourceState::DepthRead;
+                    state |= HAL::ResourceState::DepthRead;
                 }
 
-                if (isTypeless)
-                {
-                    passInfo.SubresourceInfos[mipLevel]->ShaderVisibleFormat = concreteFormat;
-                }
+                schedulingInfo.SetSubresourceInfo(
+                    passName,
+                    mipLevel,
+                    state,
+                    PipelineResourceSchedulingInfo::SubresourceInfo::AccessFlag::TextureSR,
+                    isTypeless ? concreteFormat : std::nullopt
+                );
             }
         });
     }
@@ -190,15 +205,13 @@ namespace PathFinder
 
             for (auto mipLevel : mips)
             {
-                PipelineResourceSchedulingInfo::PassInfo& passInfo = schedulingInfo.AllocateInfoForPass(passName);
-                passInfo.SubresourceInfos[mipLevel] = PipelineResourceSchedulingInfo::SubresourceInfo{};
-                passInfo.SubresourceInfos[mipLevel]->SetTextureUARequested();
-                passInfo.SubresourceInfos[mipLevel]->RequestedState = HAL::ResourceState::UnorderedAccess;
-
-                if (isTypeless)
-                {
-                    passInfo.SubresourceInfos[mipLevel]->ShaderVisibleFormat = concreteFormat;
-                }
+                schedulingInfo.SetSubresourceInfo(
+                    passName,
+                    mipLevel,
+                    HAL::ResourceState::UnorderedAccess,
+                    PipelineResourceSchedulingInfo::SubresourceInfo::AccessFlag::TextureUA,
+                    isTypeless ? concreteFormat : std::nullopt
+                );
             }
         });
     }
@@ -236,7 +249,8 @@ namespace PathFinder
             mUtilityProvider->DefaultRenderSurfaceDescription.Dimensions(),
             std::nullopt,
             HAL::ColorClearValue{ 0, 0, 0, 1 },
-            1
+            1,
+            properties->Flags
         };
 
         if (properties)
@@ -257,7 +271,8 @@ namespace PathFinder
         NewDepthStencilProperties filledProperties{
             mUtilityProvider->DefaultRenderSurfaceDescription.DepthStencilFormat(),
             mUtilityProvider->DefaultRenderSurfaceDescription.Dimensions(),
-            1
+            1,
+            properties->Flags
         };
 
         if (properties)

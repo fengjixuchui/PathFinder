@@ -30,13 +30,9 @@ namespace PathFinder
      
     void ShadingRenderPass::ScheduleResources(ResourceScheduler* scheduler)
     { 
-        ResourceScheduler::NewTextureProperties outputProperties{};
-        outputProperties.MipCount = 5;
-        outputProperties.Flags = ResourceScheduler::ReadFlags::CrossFrameRead;
-
-        scheduler->NewTexture(ResourceNames::ShadingAnalyticOutput, outputProperties);
-        scheduler->NewTexture(ResourceNames::StochasticShadowedShadingOutput, outputProperties);
-        scheduler->NewTexture(ResourceNames::StochasticUnshadowedShadingOutput, outputProperties);
+        scheduler->NewTexture(ResourceNames::ShadingAnalyticOutput);
+        scheduler->NewTexture(ResourceNames::StochasticShadowedShadingOutput);
+        scheduler->NewTexture(ResourceNames::StochasticUnshadowedShadingOutput);
         
         scheduler->ReadTexture(ResourceNames::GBufferAlbedoMetalness);
         scheduler->ReadTexture(ResourceNames::GBufferNormalRoughness);

@@ -67,6 +67,7 @@ namespace PathFinder
         viewDepthProperties.ShaderVisibleFormat = HAL::ColorFormat::R32_Float;
         viewDepthProperties.MipCount = 5; 
         viewDepthProperties.ClearValues = HAL::ColorClearValue{ std::numeric_limits<float>::max() };
+        viewDepthProperties.Flags = ResourceScheduler::Flags::CrossFrameRead;
 
         scheduler->NewRenderTarget(ResourceNames::GBufferAlbedoMetalness, albedoMetalnessProperties);
         scheduler->NewRenderTarget(ResourceNames::GBufferNormalRoughness, normalRoughnessProperties);
@@ -75,9 +76,6 @@ namespace PathFinder
         scheduler->NewRenderTarget(ResourceNames::GBufferViewDepth[0], viewDepthProperties);
         scheduler->NewRenderTarget(ResourceNames::GBufferViewDepth[1], viewDepthProperties);
         scheduler->NewDepthStencil(ResourceNames::GBufferDepthStencil);
-
-        // DEBUG
-        //scheduler->ReadTexture(ResourceNames::ShadingAnalyticOutput);
     }  
 
     void GBufferRenderPass::Render(RenderContext<RenderPassContentMediator>* context) 

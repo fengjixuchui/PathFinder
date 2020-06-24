@@ -191,9 +191,9 @@ namespace PathFinder
 
         mPassCommandLists.clear();
 
-        for (const RenderPassGraph::Node* node : mRenderPassGraph->OrderedNodes())
+        for (const RenderPassGraph::Node& node : mRenderPassGraph->Nodes())
         {
-            CommandListPtrVariant cmdListVariant = AllocateCommandListForQueue(node->ExecutionQueueIndex);
+            CommandListPtrVariant cmdListVariant = AllocateCommandListForQueue(node.ExecutionQueueIndex);
             std::visit([this](auto&& cmdList) { cmdList->SetDescriptorHeap(*mUniversalGPUDescriptorHeap); }, cmdListVariant);
             mPassCommandLists.emplace_back(PassCommandLists{ GraphicsCommandListPtr{nullptr}, std::move(cmdListVariant) });
         }
@@ -307,15 +307,16 @@ namespace PathFinder
 
     void RenderDevice::CreatePassHelpers()
     {
-        mPassHelpers.clear();
+        mPassHelpers.resize(mRenderPassGraph->Nodes().size());
 
-        for (const RenderPassGraph::Node* node : mRenderPassGraph->OrderedNodes())
+        for (const RenderPassGraph::Node& node : mRenderPassGraph->Nodes())
         {
-            PassHelpers& helpers = mPassHelpers.emplace_back();
-            helpers.ResourceStoragePassData = mResourceStorage->GetPerPassData(node->PassMetadata().Name);
+            // Zero out helpers on new frame
+            mPassHelpers[node.GlobalExecutionIndex()] = PassHelpers{};
+            PassHelpers& helpers = mPassHelpers[node.GlobalExecutionIndex()];
+            helpers.ResourceStoragePassData = mResourceStorage->GetPerPassData(node.PassMetadata().Name);
             helpers.ResourceStoragePassData->LastSetConstantBufferDataSize = 0;
             helpers.ResourceStoragePassData->PassConstantBufferMemoryOffset = 0;
-            helpers.ResourceStoragePassData->PassConstantData.clear();
             helpers.ResourceStoragePassData->IsAllowedToAdvanceConstantBufferOffset = false;
         }
     }
@@ -329,7 +330,15 @@ namespace PathFinder
         mReroutedTransitionsCommandLists.resize(mRenderPassGraph->DependencyLevels().size());
 
         mPerNodeBeginBarriers.clear();
-        mPerNodeBeginBarriers.resize(mRenderPassGraph->OrderedNodes().size());
+        mPerNodeBeginBarriers.resize(mRenderPassGraph->Nodes().size());
+
+        // If memory layout did not change we reuse aliasing barriers from previous frame.
+        // Otherwise we start from scratch.
+        if (mResourceStorage->HasMemoryLayoutChange())
+        {
+            mPerNodeAliasingBarriers.clear();
+            mPerNodeAliasingBarriers.resize(mRenderPassGraph->Nodes().size());
+        }
 
         mSubresourcesPreviousTransitionInfo.clear();
 
@@ -337,9 +346,6 @@ namespace PathFinder
         {
             mDependencyLevelTransitionBarriers.clear();
             mDependencyLevelTransitionBarriers.resize(dependencyLevel.Nodes().size());
-
-            mDependencyLevelAliasingBarriers.clear();
-            mDependencyLevelAliasingBarriers.resize(dependencyLevel.Nodes().size());
 
             GatherResourceTransitionKnowledge(dependencyLevel);
             BatchCommandListsWithTransitionRerouting(dependencyLevel);
@@ -415,7 +421,7 @@ namespace PathFinder
 
                 if (passInfo->NeedsAliasingBarrier)
                 {
-                    mDependencyLevelAliasingBarriers[node->LocalToDependencyLevelExecutionIndex()].emplace_back(HAL::ResourceAliasingBarrier{ nullptr, resourceData->GetGPUResource()->HALResource() });
+                    mPerNodeAliasingBarriers[node->GlobalExecutionIndex()].AddBarrier(HAL::ResourceAliasingBarrier{ nullptr, resourceData->GetGPUResource()->HALResource() });
                 }
 
                 if (passInfo->NeedsUnorderedAccessBarrier)
@@ -429,12 +435,9 @@ namespace PathFinder
     void RenderDevice::CollectNodeTransitions(const RenderPassGraph::Node* node, uint64_t currentCommandListBatchIndex, HAL::ResourceBarrierCollection& collection)
     {
         const std::vector<SubresourceTransitionInfo>& nodeTransitionBarriers = mDependencyLevelTransitionBarriers[node->LocalToDependencyLevelExecutionIndex()];
-        const std::vector<HAL::ResourceAliasingBarrier>& nodeAliasingBarriers = mDependencyLevelAliasingBarriers[node->LocalToDependencyLevelExecutionIndex()];
+        const HAL::ResourceBarrierCollection& nodeAliasingBarriers = mPerNodeAliasingBarriers[node->GlobalExecutionIndex()];
 
-        for (const HAL::ResourceAliasingBarrier& aliasingBarrier : nodeAliasingBarriers)
-        {
-            collection.AddBarrier(aliasingBarrier);
-        }
+        collection.AddBarriers(nodeAliasingBarriers);
 
         for (const SubresourceTransitionInfo& transitionInfo : nodeTransitionBarriers)
         {
@@ -613,13 +616,13 @@ namespace PathFinder
 
     void RenderDevice::RecordBeginBarriers()
     {
-        for (const RenderPassGraph::Node* node : mRenderPassGraph->OrderedNodes())
+        for (const RenderPassGraph::Node& node : mRenderPassGraph->Nodes())
         {
-            const HAL::ResourceBarrierCollection& beginBarriers = mPerNodeBeginBarriers[node->GlobalExecutionIndex()];
+            const HAL::ResourceBarrierCollection& beginBarriers = mPerNodeBeginBarriers[node.GlobalExecutionIndex()];
             
             if (beginBarriers.BarrierCount() > 0)
             {
-                HAL::ComputeCommandListBase* cmdList = GetComputeCommandListBase(mPassCommandLists[node->GlobalExecutionIndex()].WorkCommandList);
+                HAL::ComputeCommandListBase* cmdList = GetComputeCommandListBase(mPassCommandLists[node.GlobalExecutionIndex()].WorkCommandList);
                 cmdList->InsertBarriers(beginBarriers);
             }
         }

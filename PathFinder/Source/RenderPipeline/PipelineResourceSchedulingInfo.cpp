@@ -6,50 +6,21 @@ namespace PathFinder
 {
 
     PipelineResourceSchedulingInfo::PipelineResourceSchedulingInfo(Foundation::Name resourceName, const HAL::ResourceFormat& format)
-        : mResourceFormat{ format }, mResourceName{ resourceName }, mSubresourceCount{ format.SubresourceCount() } {}
+        : mResourceFormat{ format }, mResourceName{ resourceName }, mSubresourceCount{ format.SubresourceCount() }
+    {
+        mSubresourceCombinedReadStates.resize(mSubresourceCount);
+        mSubresourceWriteStates.resize(mSubresourceCount);
+    }
+
+    void PipelineResourceSchedulingInfo::AddExpectedStates(HAL::ResourceState states)
+    {
+        mExpectedStates |= states;
+    }
 
     void PipelineResourceSchedulingInfo::FinishScheduling()
     {
-        HAL::ResourceState expectedStates = HAL::ResourceState::Common;
-
-        mSubresourceCombinedReadStates.resize(mSubresourceCount);
-        mSubresourceWriteStates.resize(mSubresourceCount);
-
-        for (auto& [passName, info] : mPassInfoMap)
-        {
-            for (auto subresourceIdx = 0; subresourceIdx < mSubresourceCount; ++subresourceIdx)
-            {
-                std::optional<SubresourceInfo>& subresourceInfo = info.SubresourceInfos[subresourceIdx];
-
-                if (!subresourceInfo)
-                {
-                    continue;
-                }
-
-                expectedStates |= subresourceInfo->RequestedState;
-
-                if (EnumMaskBitSet(expectedStates, HAL::ResourceState::UnorderedAccess))
-                {
-                    info.NeedsUnorderedAccessBarrier = true;
-                }
-
-                if (IsResourceStateReadOnly(subresourceInfo->RequestedState))
-                {
-                    mSubresourceCombinedReadStates[subresourceIdx] |= subresourceInfo->RequestedState;
-                }
-                else
-                {
-                    assert_format(mSubresourceWriteStates[subresourceIdx] == HAL::ResourceState::Common,
-                        "One write state is already requested. Engine architecture allows one write per frame.");
-
-                    mSubresourceWriteStates[subresourceIdx] = subresourceInfo->RequestedState;
-                }
-            }
-
-        }
-
-        mExpectedStates = expectedStates;
-        mResourceFormat.SetExpectedStates(expectedStates);
+        // Determine final memory requirements
+        mResourceFormat.SetExpectedStates(mExpectedStates);
     }
 
     const PipelineResourceSchedulingInfo::PassInfo* PipelineResourceSchedulingInfo::GetInfoForPass(Foundation::Name passName) const
@@ -64,11 +35,40 @@ namespace PathFinder
         return it != mPassInfoMap.end() ? &it->second : nullptr;
     }
 
-    PipelineResourceSchedulingInfo::PassInfo& PipelineResourceSchedulingInfo::AllocateInfoForPass(Foundation::Name passName)
+    void PipelineResourceSchedulingInfo::SetSubresourceInfo(
+        Foundation::Name passName,
+        uint64_t subresourceIndex,
+        HAL::ResourceState state,
+        SubresourceInfo::AccessFlag accessFlag,
+        std::optional<HAL::ColorFormat> shaderVisibleFormat)
     {
-        auto [it, success] = mPassInfoMap.emplace(passName, PassInfo{});
-        it->second.SubresourceInfos.resize(mSubresourceCount);
-        return it->second;
+        assert_format(subresourceIndex < mSubresourceCount, "Subresource index is out of bounds");
+
+        PassInfo& passInfo = mPassInfoMap[passName];
+        passInfo.SubresourceInfos.resize(mSubresourceCount);
+        passInfo.SubresourceInfos[subresourceIndex] = SubresourceInfo{};
+        passInfo.SubresourceInfos[subresourceIndex]->AccessValidationFlag = accessFlag;
+        passInfo.SubresourceInfos[subresourceIndex]->RequestedState = state;
+        passInfo.SubresourceInfos[subresourceIndex]->ShaderVisibleFormat = shaderVisibleFormat;
+
+        if (IsResourceStateReadOnly(state))
+        {
+            mSubresourceCombinedReadStates[subresourceIndex] |= state;
+        }
+        else
+        {
+            assert_format(mSubresourceWriteStates[subresourceIndex] == HAL::ResourceState::Common,
+                "One write state for subresource is already requested. Engine architecture allows one write per frame.");
+
+            mSubresourceWriteStates[subresourceIndex] = state;
+
+            if (EnumMaskBitSet(state, HAL::ResourceState::UnorderedAccess))
+            {
+                passInfo.NeedsUnorderedAccessBarrier = true;
+            }
+        }
+
+        mExpectedStates |= state;
     }
 
     HAL::ResourceState PipelineResourceSchedulingInfo::GetSubresourceCombinedReadStates(uint64_t subresourceIndex) const

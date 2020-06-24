@@ -21,9 +21,11 @@ namespace PathFinder
             Constant, ShaderResource
         };
 
-        enum class ReadFlags : uint32_t
+        enum class Flags : uint32_t
         {
-            None = 0, CrossFrameRead = 1 << 0
+            None = 0, 
+            CrossFrameRead = 1 << 0, // Resource will be read across frames so it cannot participate in memory aliasing
+            WillNotWrite = 1 << 1    // Resource will not be written and should not be added to the graph as write dependency
         };
 
         struct NewTextureProperties
@@ -35,7 +37,7 @@ namespace PathFinder
                 std::optional<HAL::TypelessColorFormat> typelessFormat = std::nullopt,
                 std::optional<HAL::ColorClearValue> clearValues = std::nullopt,
                 uint8_t mipCount = 1,
-                ReadFlags readFlags = ReadFlags::None)
+                Flags readFlags = Flags::None)
                 : 
                 TypelessFormat{ typelessFormat }, ShaderVisibleFormat{ shaderVisibleFormat }, 
                 Kind{ kind }, Dimensions{ dimensions }, ClearValues{ clearValues }, MipCount{ mipCount }, Flags{ readFlags } {}
@@ -46,7 +48,7 @@ namespace PathFinder
             std::optional<Geometry::Dimensions> Dimensions;
             std::optional<HAL::ColorClearValue> ClearValues;
             uint8_t MipCount;
-            ReadFlags Flags;
+            Flags Flags;
         };
 
         struct NewDepthStencilProperties
@@ -55,25 +57,25 @@ namespace PathFinder
                 std::optional<HAL::DepthStencilFormat> format = std::nullopt,
                 std::optional<Geometry::Dimensions> dimensions = std::nullopt,
                 uint8_t mipCount = 1,
-                ReadFlags readFlags = ReadFlags::None)
+                Flags readFlags = Flags::None)
                 : 
                 Format{ format }, Dimensions{ dimensions }, MipCount{ mipCount }, Flags{ readFlags } {}
 
             std::optional<HAL::DepthStencilFormat> Format;
             std::optional<Geometry::Dimensions> Dimensions;
             uint8_t MipCount;
-            ReadFlags Flags;
+            Flags Flags;
         };
 
         template <class T>
         struct NewBufferProperties
         {
-            NewBufferProperties(uint64_t capacity = 1, uint64_t perElementAlignment = 1, ReadFlags readFlags = ReadFlags::None)
+            NewBufferProperties(uint64_t capacity = 1, uint64_t perElementAlignment = 1, Flags readFlags = Flags::None)
                 : Capacity{ capacity }, PerElementAlignment{ perElementAlignment }, Flags{ readFlags } {}
 
             uint64_t Capacity;
             uint64_t PerElementAlignment;
-            ReadFlags Flags;
+            Flags Flags;
         };
 
         struct NewByteBufferProperties : public NewBufferProperties<uint8_t> {};
@@ -140,6 +142,6 @@ namespace PathFinder
 
 }
 
-ENABLE_BITMASK_OPERATORS(PathFinder::ResourceScheduler::ReadFlags);
+ENABLE_BITMASK_OPERATORS(PathFinder::ResourceScheduler::Flags);
 
 #include "ResourceScheduler.inl"

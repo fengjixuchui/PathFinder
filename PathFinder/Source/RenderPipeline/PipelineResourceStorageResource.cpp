@@ -26,7 +26,7 @@ namespace PathFinder
 
     PipelineResourceStorageResource::DiffEntry PipelineResourceStorageResource::GetDiffEntry() const
     {
-        return { mResourceName, SchedulingInfo.TotalRequiredMemory(), 0, 0 };
+        return { mResourceName, SchedulingInfo.CanBeAliased, SchedulingInfo.ExpectedStates(), SchedulingInfo.TotalRequiredMemory(), 0, 0 };
     }
 
     bool PipelineResourceStorageResource::DiffEntry::operator==(const DiffEntry& that) const
@@ -34,10 +34,19 @@ namespace PathFinder
         // Pipeline Resource is identified by its name, memory footprint and lifetime,
         // which is sufficient to understand when
         // resource allocation, reallocation or deallocation is required.
-        return this->ResourceName == that.ResourceName && 
-            this->MemoryFootprint == that.MemoryFootprint &&
-            this->LifetimeStart == that.LifetimeStart &&
-            this->LifetimeEnd == that.LifetimeEnd;
+        bool equal = 
+            ResourceName == that.ResourceName &&
+            MemoryFootprint == that.MemoryFootprint &&
+            CanBeAliased == that.CanBeAliased &&
+            ExpectedStates == that.ExpectedStates;
+
+        // Compare timelines only if resource can be aliased
+        if (CanBeAliased)
+        {
+            equal = equal && LifetimeStart == that.LifetimeStart && LifetimeEnd == that.LifetimeEnd;
+        }
+
+        return equal;
     }
 
 }

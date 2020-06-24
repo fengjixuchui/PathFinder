@@ -101,17 +101,17 @@ int main(int argc, char** argv)
     engine.AddRenderPass(commonSetupPass.get());
     engine.AddRenderPass(GBufferPass.get());
     engine.AddRenderPass(shadingPass.get());
-    //engine.AddRenderPass(denoiserPreBlurPass.get());
-    //engine.AddRenderPass(denoiserMipGenerationPass.get());
-    //engine.AddRenderPass(denoiserReprojectionPass.get());
-    //engine.AddRenderPass(denoiserHistoryFixPass.get());
-    //engine.AddRenderPass(specularDenoiserPass.get());
-    //engine.AddRenderPass(denoiserPostStabilizationPass.get());
+    engine.AddRenderPass(denoiserPreBlurPass.get());
+    engine.AddRenderPass(denoiserMipGenerationPass.get());
+    engine.AddRenderPass(denoiserReprojectionPass.get());
+    engine.AddRenderPass(denoiserHistoryFixPass.get());
+    engine.AddRenderPass(specularDenoiserPass.get());
+    engine.AddRenderPass(denoiserPostStabilizationPass.get());
     //engine.AddRenderPass(bloomBlurPass.get());
     //engine.AddRenderPass(bloomCompositionPass.get());
-    //engine.AddRenderPass(toneMappingPass.get());
-    //engine.AddRenderPass(backBufferOutputPass.get());
-    //engine.AddRenderPass(uiPass.get());
+    engine.AddRenderPass(toneMappingPass.get());
+    engine.AddRenderPass(backBufferOutputPass.get());
+    engine.AddRenderPass(uiPass.get());
 
    /* auto sphereLight0 = scene.EmplaceSphericalLight();
     sphereLight0->SetRadius(7);

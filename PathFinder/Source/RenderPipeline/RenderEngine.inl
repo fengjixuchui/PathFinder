@@ -81,14 +81,24 @@ namespace PathFinder
             mRenderPassGraph.AddPass(passPtr->Metadata());
             // Run PSO setup
             passPtr->SetupPipelineStates(&mPipelineStateCreator, &mRootSignatureCreator);
+        }
+
+        auto nodeIdx = 0;
+
+        for (auto& [passName, passPtrAndContextIdx] : mRenderPasses)
+        {
+            auto& [passPtr, contextIdx] = passPtrAndContextIdx;
+
             // Create a separate command recorder for each pass
-            CommandRecorder& commandRecorder = mCommandRecorders.emplace_back(&mRenderDevice, &mRenderPassGraph.RawNodes().back());
-            ResourceProvider& resourceProvider = mResourceProviders.emplace_back(&mPipelineResourceStorage, &mRenderPassGraph.RawNodes().back());
-            RootConstantsUpdater& constantsUpdater = mRootConstantUpdaters.emplace_back(&mPipelineResourceStorage, &mRenderPassGraph.RawNodes().back());
+            CommandRecorder& commandRecorder = mCommandRecorders.emplace_back(&mRenderDevice, &mRenderPassGraph.Nodes()[nodeIdx]);
+            ResourceProvider& resourceProvider = mResourceProviders.emplace_back(&mPipelineResourceStorage, &mRenderPassGraph.Nodes()[nodeIdx]);
+            RootConstantsUpdater& constantsUpdater = mRootConstantUpdaters.emplace_back(&mPipelineResourceStorage, &mRenderPassGraph.Nodes()[nodeIdx]);
             RenderContext<ContentMediator> context{ &commandRecorder, &constantsUpdater, &resourceProvider, &mPassUtilityProvider };
             context.SetContent(mContentMediator);
             mRenderContexts.push_back(context);
             contextIdx = mRenderContexts.size() - 1;
+
+            ++nodeIdx;
         }
 
         // Make resource storage allocate necessary info using graph nodes
@@ -135,7 +145,7 @@ namespace PathFinder
     template <class ContentMediator>
     void RenderEngine<ContentMediator>::Render()
     {
-        if (mRenderPassGraph.RawNodes().empty()) return;
+        if (mRenderPassGraph.Nodes().empty()) return;
 
         // First frame starts in engine constructor
         if (mFrameNumber > 0)
@@ -289,7 +299,7 @@ namespace PathFinder
     {
         Memory::Texture* currentBackBuffer = mBackBuffers[mCurrentBackBufferIndex].get();
         mRenderDevice.SetBackBuffer(currentBackBuffer);
-        auto& nodes = mRenderPassGraph.RawNodes();
+        auto& nodes = mRenderPassGraph.Nodes();
 
         for (auto nodeIt = nodes.begin(); nodeIt != nodes.end(); ++nodeIt)
         {
@@ -311,7 +321,7 @@ namespace PathFinder
         mPipelineResourceStorage.StartResourceScheduling();
 
         // Schedule resources and states
-        for (RenderPassGraph::Node& passNode : mRenderPassGraph.RawNodes())
+        for (RenderPassGraph::Node& passNode : mRenderPassGraph.Nodes())
         {
             auto& [passPtr, passContextIdx] = mRenderPasses[passNode.PassMetadata().Name];
             mResourceScheduler.SetCurrentlySchedulingPassNode(&passNode);

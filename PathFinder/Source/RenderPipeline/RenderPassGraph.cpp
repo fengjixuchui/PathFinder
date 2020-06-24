@@ -29,6 +29,7 @@ namespace PathFinder
     {
         EnsureRenderPassUniqueness(passMetadata.Name);
         mPassNodes.emplace_back(Node{ passMetadata, &mGlobalWriteDependencyRegistry });
+        mPassNodes.back().mIndexInUnorderedList = mPassNodes.size() - 1;
     }
 
     void RenderPassGraph::RemovePass(NodeListIterator it)
@@ -51,7 +52,8 @@ namespace PathFinder
         mDependencyLevels.clear();
         mResourceUsageTimelines.clear();
         mQueueNodeCounters.clear();
-        mOrderedNodes.clear();
+        mTopologicallySortedNodes.clear();
+        mNodesInGlobalExecutionOrder.clear();
         mAdjacencyLists.clear();
         mFirstNodeThatUsesRayTracing = nullptr;
         mDetectedQueueCount = 1;
@@ -130,7 +132,9 @@ namespace PathFinder
         visited[nodeIndex] = true;
         onStack[nodeIndex] = true;
 
-        for (uint64_t neighbour : mAdjacencyLists[nodeIndex])
+        uint64_t adjacencyListIndex = mPassNodes[nodeIndex].mIndexInUnorderedList;
+
+        for (uint64_t neighbour : mAdjacencyLists[adjacencyListIndex])
         {
             if (visited[neighbour] && onStack[neighbour])
             {
@@ -145,7 +149,7 @@ namespace PathFinder
         }
 
         onStack[nodeIndex] = false;
-        mOrderedNodes.push_back(&mPassNodes[nodeIndex]);
+        mTopologicallySortedNodes.push_back(&mPassNodes[nodeIndex]);
     }
 
     void RenderPassGraph::TopologicalSort()
@@ -164,9 +168,9 @@ namespace PathFinder
             }
         }
 
-        std::reverse(mOrderedNodes.begin(), mOrderedNodes.end());
+        std::reverse(mTopologicallySortedNodes.begin(), mTopologicallySortedNodes.end());
 
-        for (const Node* node : mOrderedNodes)
+        for (const Node* node : mTopologicallySortedNodes)
         {
             OutputDebugString(StringFormat("%s \n", node->PassMetadata().Name.ToString().c_str()).c_str());
         }
@@ -174,33 +178,21 @@ namespace PathFinder
 
     void RenderPassGraph::BuildDependencyLevels()
     {
-        constexpr auto NoDistance = std::numeric_limits<int64_t>::lowest();
-        std::vector<int64_t> longestDistances(mOrderedNodes.size(), NoDistance);
+        std::vector<int64_t> longestDistances(mTopologicallySortedNodes.size(), 0);
 
-        // Find root nodes to start longest path search from
-        for (auto nodeIndex = 0; nodeIndex < mOrderedNodes.size(); ++nodeIndex)
-        {
-            if (!mAdjacencyLists[nodeIndex].empty())
-            {
-                longestDistances[nodeIndex] = 0;
-            }
-        }
-
-        uint64_t dependencyLevelCount = 0;
+        uint64_t dependencyLevelCount = 1;
 
         // Perform longest node distance search
-        for (auto nodeIndex = 0; nodeIndex < mOrderedNodes.size(); ++nodeIndex)
+        for (auto nodeIndex = 0; nodeIndex < mTopologicallySortedNodes.size(); ++nodeIndex)
         {
-            if (longestDistances[nodeIndex] == NoDistance)
-            {
-                continue;
-            }
+            uint64_t originalIndex = mTopologicallySortedNodes[nodeIndex]->mIndexInUnorderedList;
+            uint64_t adjacencyListIndex = originalIndex;
 
-            for (uint64_t adjacentNodeIndex : mAdjacencyLists[nodeIndex])
+            for (uint64_t adjacentNodeIndex : mAdjacencyLists[adjacencyListIndex])
             {
-                if (longestDistances[adjacentNodeIndex] < longestDistances[nodeIndex] + 1)
+                if (longestDistances[adjacentNodeIndex] < longestDistances[originalIndex] + 1)
                 {
-                    int64_t newLongestDistance = longestDistances[nodeIndex] + 1;
+                    int64_t newLongestDistance = longestDistances[originalIndex] + 1;
                     longestDistances[adjacentNodeIndex] = newLongestDistance;
                     dependencyLevelCount = std::max(uint64_t(newLongestDistance + 1), dependencyLevelCount);
                 }
@@ -210,27 +202,32 @@ namespace PathFinder
         mDependencyLevels.resize(dependencyLevelCount);
         mDetectedQueueCount = 1;
 
-        // Dispatch nodes to corresponding dependency levels
-        for (auto nodeIndex = 0; nodeIndex < mOrderedNodes.size(); ++nodeIndex)
+        // Dispatch nodes to corresponding dependency levels.
+        // Iterate through unordered nodes because adjacency lists contain indices to 
+        // initial unordered list of nodes and longest distances also correspond to them.
+        for (auto nodeIndex = 0; nodeIndex < mPassNodes.size(); ++nodeIndex)
         {
-            Node* node = mOrderedNodes[nodeIndex];
-            uint64_t levelIndex = longestDistances[nodeIndex] == NoDistance ? 0 : longestDistances[nodeIndex];
+            Node& node = mPassNodes[nodeIndex];
+            uint64_t levelIndex = longestDistances[nodeIndex];
             DependencyLevel& dependencyLevel = mDependencyLevels[levelIndex];
             dependencyLevel.mLevelIndex = levelIndex;
-            dependencyLevel.AddNode(node);
-            mDetectedQueueCount = std::max(mDetectedQueueCount, node->ExecutionQueueIndex + 1);
+            dependencyLevel.AddNode(&node);
+            node.mDependencyLevelIndex = levelIndex;
+            mDetectedQueueCount = std::max(mDetectedQueueCount, node.ExecutionQueueIndex + 1);
         }
     }
 
     void RenderPassGraph::FinalizeDependencyLevels()
     {
         uint64_t globalExecutionIndex = 0;
-        uint64_t localExecutionIndex = 0;
-
         bool firstRayTracingUserDetected = false;
+
+        mNodesInGlobalExecutionOrder.resize(mTopologicallySortedNodes.size(), nullptr);
         
         for (DependencyLevel& dependencyLevel : mDependencyLevels)
         {
+            uint64_t localExecutionIndex = 0;
+
             std::unordered_map<SubresourceName, std::unordered_set<Node::QueueIndex>> resourceReadingQueueTracker;
             dependencyLevel.mNodesPerQueue.resize(mDetectedQueueCount);
 
@@ -246,10 +243,13 @@ namespace PathFinder
                 node->mLocalToDependencyLevelExecutionIndex = localExecutionIndex;
                 node->mLocalToQueueExecutionIndex = mQueueNodeCounters[node->ExecutionQueueIndex]++;
 
+                mNodesInGlobalExecutionOrder[globalExecutionIndex] = node;
+
                 dependencyLevel.mNodesPerQueue[node->ExecutionQueueIndex].push_back(node);
 
                 for (SubresourceName subresourceName : node->AllSubresources())
                 {
+                    // Timeline for resource is determined as an enclosing range of all of its subresource timelines
                     auto [resourceName, subresourceIndex] = DecodeSubresourceName(subresourceName);
 
                     auto timelineIt = mResourceUsageTimelines.find(resourceName);
@@ -262,7 +262,9 @@ namespace PathFinder
                     }
                     else {
                         // Create "start"
-                        mResourceUsageTimelines[resourceName].first = node->GlobalExecutionIndex();
+                        auto& timeline = mResourceUsageTimelines[resourceName];
+                        timeline.first = node->GlobalExecutionIndex();
+                        timeline.second = node->GlobalExecutionIndex();
                     }
                 }
 
@@ -290,8 +292,6 @@ namespace PathFinder
                     }
                 }
             }
-
-            localExecutionIndex = 0;
         }
     }
 

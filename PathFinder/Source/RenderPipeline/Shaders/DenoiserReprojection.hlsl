@@ -5,6 +5,7 @@
 #include "GBuffer.hlsl"
 #include "Utils.hlsl"
 #include "Filtering.hlsl"
+#include "ColorConversion.hlsl"
 
 struct PassData
 {
@@ -14,10 +15,14 @@ struct PassData
     uint PreviousViewDepthTexIdx;
     uint CurrentAccumulationCounterTexIdx;
     uint PreviousAccumulationCounterTexIdx;
+    uint ShadowedShadingTexIdx;
+    uint UnshadowedShadingTexIdx;
     uint ShadowedShadingHistoryTexIdx;
     uint UnshadowedShadingHistoryTexIdx;
     uint ShadowedShadingReprojectionTargetTexIdx;
     uint UnshadowedShadingReprojectionTargetTexIdx;
+    uint ShadingGradientTexIdx;
+    uint ShadingGradientNormFactorTexIdx;
 };
 
 #define PassDataType PassData
@@ -42,12 +47,16 @@ void CSMain(int3 dispatchThreadID : SV_DispatchThreadID, int3 groupThreadID : SV
     Texture2D prevViewDepthTexture = Textures2D[PassDataCB.PreviousViewDepthTexIdx];
     Texture2D currentViewDepthTexture = Textures2D[PassDataCB.CurrentViewDepthTexIdx];
     Texture2D prevAccumulationCounterTexture = Textures2D[PassDataCB.PreviousAccumulationCounterTexIdx];
+    Texture2D shadowedShadingTexture = Textures2D[PassDataCB.ShadowedShadingTexIdx];
+    Texture2D unshadowedShadingTexture = Textures2D[PassDataCB.UnshadowedShadingTexIdx];
     Texture2D shadowedShadingHistoryTexture = Textures2D[PassDataCB.ShadowedShadingHistoryTexIdx];
     Texture2D unshadowedShadingHistoryTexture = Textures2D[PassDataCB.UnshadowedShadingHistoryTexIdx];
     
     RWTexture2D<float4> currentAccumulationCounterTexture = RW_Float4_Textures2D[PassDataCB.CurrentAccumulationCounterTexIdx];
     RWTexture2D<float4> shadowedShadingReprojectionTarget = RW_Float4_Textures2D[PassDataCB.ShadowedShadingReprojectionTargetTexIdx];
     RWTexture2D<float4> unshadowedShadingReprojectionTarget = RW_Float4_Textures2D[PassDataCB.UnshadowedShadingReprojectionTargetTexIdx];
+    RWTexture2D<float4> shadingGradientTarget = RW_Float4_Textures2D[PassDataCB.ShadingGradientTexIdx];
+    RWTexture2D<float4> shadingGradientNormFactorTarget = RW_Float4_Textures2D[PassDataCB.ShadingGradientNormFactorTexIdx];
 
     float roughness;
     float3 surfaceNormal;
@@ -115,6 +124,15 @@ void CSMain(int3 dispatchThreadID : SV_DispatchThreadID, int3 groupThreadID : SV
     currentAccumulationCounterTexture[pixelIndex] = accumCountNew;
     shadowedShadingReprojectionTarget[pixelIndex].rgb = shadowedShadingReprojected;
     unshadowedShadingReprojectionTarget[pixelIndex].rgb = unshadowedShadingReprojected;
+
+    float shadowedShadingLuminance = CIELuminance(shadowedShadingReprojected);
+    float unshadowedShadingLuminance = CIELuminance(unshadowedShadingReprojected);
+
+    float shadowedShadingGradient = CIELuminance(shadowedShadingTexture[pixelIndex].rgb) - shadowedShadingLuminance;
+    float unshadowedShadingGradient = CIELuminance(unshadowedShadingTexture[pixelIndex].rgb) - unshadowedShadingLuminance;
+
+    shadingGradientTarget[pixelIndex].rg = float2(abs(shadowedShadingGradient), abs(unshadowedShadingGradient));
+    shadingGradientNormFactorTarget[pixelIndex].rg = float2(shadowedShadingLuminance, unshadowedShadingLuminance);
 }
 
 #endif

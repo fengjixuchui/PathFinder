@@ -7,6 +7,14 @@
 namespace PathFinder
 {
 
+    RenderPassGraph::SubresourceName RenderPassGraph::ConstructSubresourceName(Foundation::Name resourceName, uint32_t subresourceIndex)
+    {
+        SubresourceName name = resourceName.ToId();
+        name <<= 32;
+        name |= subresourceIndex;
+        return name;
+    }
+
     std::pair<Foundation::Name, uint32_t> RenderPassGraph::DecodeSubresourceName(SubresourceName name)
     {
         return { Foundation::Name{ name >> 32 }, name & 0x0000FFFF };
@@ -25,16 +33,12 @@ namespace PathFinder
         return timelineIt->second;
     }
 
-    void RenderPassGraph::AddPass(const RenderPassMetadata& passMetadata)
+    uint64_t RenderPassGraph::AddPass(const RenderPassMetadata& passMetadata)
     {
         EnsureRenderPassUniqueness(passMetadata.Name);
         mPassNodes.emplace_back(Node{ passMetadata, &mGlobalWriteDependencyRegistry });
         mPassNodes.back().mIndexInUnorderedList = mPassNodes.size() - 1;
-    }
-
-    void RenderPassGraph::RemovePass(NodeListIterator it)
-    {
-        mPassNodes.erase(it);
+        return mPassNodes.size() - 1;
     }
 
     void RenderPassGraph::Build()
@@ -64,17 +68,6 @@ namespace PathFinder
         }
     }
 
-    void RenderPassGraph::IterateNodesInExecutionOrder(const std::function<void(const RenderPassGraph::Node&)>& iterator) const
-    {
-        for (const DependencyLevel& dependencyLevel : mDependencyLevels)
-        {
-            for (const Node* node : dependencyLevel.Nodes())
-            {
-                iterator(*node);
-            }
-        }
-    }
-
     void RenderPassGraph::EnsureRenderPassUniqueness(Foundation::Name passName)
     {
         assert_format(mRenderPassRegistry.find(passName) == mRenderPassRegistry.end(),
@@ -90,6 +83,12 @@ namespace PathFinder
         for (auto nodeIdx = 0; nodeIdx < mPassNodes.size(); ++nodeIdx)
         {
             Node& node = mPassNodes[nodeIdx];
+
+            if (!node.HasAnyDependencies())
+            {
+                continue;
+            }
+
             std::vector<uint64_t>& adjacentNodeIndices = mAdjacencyLists[nodeIdx];
 
             for (auto otherNodeIdx = 0; otherNodeIdx < mPassNodes.size(); ++otherNodeIdx)
@@ -157,10 +156,13 @@ namespace PathFinder
 
         for (auto nodeIndex = 0; nodeIndex < mPassNodes.size(); ++nodeIndex)
         {
-            if (!visitedNodes[nodeIndex])
+            const Node& node = mPassNodes[nodeIndex];
+
+            // Visited nodes and nodes without outputs are not processed
+            if (!visitedNodes[nodeIndex] && node.HasAnyDependencies())
             {
                 DepthFirstSearch(nodeIndex, visitedNodes, onStackNodes, isCyclic);
-                assert_format(!isCyclic, "Detected cyclic dependency in pass: ", mPassNodes[nodeIndex].PassMetadata().Name.ToString());
+                assert_format(!isCyclic, "Detected cyclic dependency in pass: ", node.PassMetadata().Name.ToString());
             }
         }
 
@@ -169,7 +171,7 @@ namespace PathFinder
 
     void RenderPassGraph::BuildDependencyLevels()
     {
-        std::vector<int64_t> longestDistances(mTopologicallySortedNodes.size(), 0);
+        std::vector<int64_t> longestDistances(mPassNodes.size(), 0);
 
         uint64_t dependencyLevelCount = 1;
 
@@ -194,17 +196,15 @@ namespace PathFinder
         mDetectedQueueCount = 1;
 
         // Dispatch nodes to corresponding dependency levels.
-        // Iterate through unordered nodes because adjacency lists contain indices to 
-        // initial unordered list of nodes and longest distances also correspond to them.
-        for (auto nodeIndex = 0; nodeIndex < mPassNodes.size(); ++nodeIndex)
+        for (auto nodeIndex = 0; nodeIndex < mTopologicallySortedNodes.size(); ++nodeIndex)
         {
-            Node& node = mPassNodes[nodeIndex];
-            uint64_t levelIndex = longestDistances[nodeIndex];
+            Node* node = mTopologicallySortedNodes[nodeIndex];
+            uint64_t levelIndex = longestDistances[node->mIndexInUnorderedList];
             DependencyLevel& dependencyLevel = mDependencyLevels[levelIndex];
             dependencyLevel.mLevelIndex = levelIndex;
-            dependencyLevel.AddNode(&node);
-            node.mDependencyLevelIndex = levelIndex;
-            mDetectedQueueCount = std::max(mDetectedQueueCount, node.ExecutionQueueIndex + 1);
+            dependencyLevel.AddNode(node);
+            node->mDependencyLevelIndex = levelIndex;
+            mDetectedQueueCount = std::max(mDetectedQueueCount, node->ExecutionQueueIndex + 1);
         }
     }
 
@@ -452,7 +452,7 @@ namespace PathFinder
     {
         for (auto i = firstSubresourceIndex; i <= lastSubresourceIndex; ++i)
         {
-            SubresourceName name = CreateSubresourceName(resourceName, i);
+            SubresourceName name = ConstructSubresourceName(resourceName, i);
             mReadSubresources.insert(name);
             mAllSubresources.insert(name);
             mAllResources.insert(resourceName);
@@ -469,7 +469,7 @@ namespace PathFinder
         {
             for (auto subresourceIndex : subresources)
             {
-                SubresourceName name = CreateSubresourceName(resourceName, subresourceIndex);
+                SubresourceName name = ConstructSubresourceName(resourceName, subresourceIndex);
                 mReadSubresources.insert(name);
                 mAllSubresources.insert(name);
                 mAllResources.insert(resourceName);
@@ -487,7 +487,7 @@ namespace PathFinder
     {
         for (auto i = firstSubresourceIndex; i <= lastSubresourceIndex; ++i)
         {
-            SubresourceName name = CreateSubresourceName(resourceName, i);
+            SubresourceName name = ConstructSubresourceName(resourceName, i);
             EnsureSingleWriteDependency(name);
             mWrittenSubresources.insert(name);
             mAllSubresources.insert(name);
@@ -505,7 +505,7 @@ namespace PathFinder
         {
             for (auto subresourceIndex : subresources)
             {
-                SubresourceName name = CreateSubresourceName(resourceName, subresourceIndex);
+                SubresourceName name = ConstructSubresourceName(resourceName, subresourceIndex);
                 EnsureSingleWriteDependency(name);
                 mWrittenSubresources.insert(name);
                 mAllSubresources.insert(name);
@@ -522,7 +522,17 @@ namespace PathFinder
 
     bool RenderPassGraph::Node::HasDependency(Foundation::Name resourceName, uint32_t subresourceIndex) const
     {
-        return mAllSubresources.find(CreateSubresourceName(resourceName, subresourceIndex)) != mAllSubresources.end();
+        return HasDependency(ConstructSubresourceName(resourceName, subresourceIndex));
+    }
+
+    bool RenderPassGraph::Node::HasDependency(SubresourceName subresourceName) const
+    {
+        return mAllSubresources.find(subresourceName) != mAllSubresources.end();
+    }
+
+    bool RenderPassGraph::Node::HasAnyDependencies() const
+    {
+        return !mAllSubresources.empty() || WritesToBackBuffer;
     }
 
     void RenderPassGraph::Node::Clear()
@@ -539,14 +549,6 @@ namespace PathFinder
         UsesRayTracing = false;
         mGlobalExecutionIndex = 0;
         mLocalToDependencyLevelExecutionIndex = 0;
-    }
-
-    RenderPassGraph::SubresourceName RenderPassGraph::Node::CreateSubresourceName(Foundation::Name resourceName, uint32_t subresourceIndex) const
-    {
-        SubresourceName name = resourceName.ToId();
-        name <<= 32;
-        name |= subresourceIndex;
-        return name;
     }
 
     void RenderPassGraph::Node::EnsureSingleWriteDependency(SubresourceName name)

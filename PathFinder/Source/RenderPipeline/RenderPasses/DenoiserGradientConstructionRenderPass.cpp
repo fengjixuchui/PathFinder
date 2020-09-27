@@ -1,4 +1,5 @@
 #include "DenoiserGradientConstructionRenderPass.hpp"
+#include "UAVClearHelper.hpp"
 
 #include "../Foundation/Gaussian.hpp"
 
@@ -10,42 +11,42 @@ namespace PathFinder
 
     void DenoiserGradientConstructionRenderPass::SetupPipelineStates(PipelineStateCreator* stateCreator, RootSignatureCreator* rootSignatureCreator)
     {
-       /* stateCreator->CreateComputeState(PSONames::DenoiserGradientConstruction, [](ComputeStateProxy& state)
+        stateCreator->CreateComputeState(PSONames::DenoiserGradientConstruction, [](ComputeStateProxy& state)
         {
             state.ComputeShaderFileName = "DenoiserGradientConstruction.hlsl";
-        });*/
+        });
     }
 
     void DenoiserGradientConstructionRenderPass::ScheduleResources(ResourceScheduler* scheduler)
     {
-        //ResourceScheduler::NewTextureProperties gradientProperties{};
-        //gradientProperties.ShaderVisibleFormat = HAL::ColorFormat::R16_Float;
+        auto currentFrameIndex = scheduler->FrameNumber() % 2;
 
-        //scheduler->NewTexture(ResourceNames::StochasticShadowedShadingGradient, gradientProperties);
-        //scheduler->NewTexture(ResourceNames::StochasticUnshadowedShadingGradient, gradientProperties);
+        scheduler->ReadTexture(ResourceNames::StochasticShadowedShadingPreBlurred);
+        scheduler->ReadTexture(ResourceNames::StochasticUnshadowedShadingPreBlurred);
+        scheduler->ReadTexture(ResourceNames::DenoiserGradientSamplePositions[currentFrameIndex]);
+        scheduler->ReadTexture(ResourceNames::DenoiserPrimaryGradientInputs);
 
-        //scheduler->ReadTexture(ResourceNames::StochasticShadowedShadingReprojected);
-        //scheduler->ReadTexture(ResourceNames::StochasticUnshadowedShadingReprojected);
-        //scheduler->ReadTexture(ResourceNames::StochasticShadowedShadingOutput);
-        //scheduler->ReadTexture(ResourceNames::StochasticUnshadowedShadingOutput);
+        scheduler->NewTexture(ResourceNames::DenoiserPrimaryGradient, ResourceScheduler::NewTextureProperties{ ResourceNames::DenoiserPrimaryGradientInputs });
     }
      
     void DenoiserGradientConstructionRenderPass::Render(RenderContext<RenderPassContentMediator>* context)
     {
-        /*     context->GetCommandRecorder()->ApplyPipelineState(PSONames::DenoiserGradientConstruction);
+        context->GetCommandRecorder()->ApplyPipelineState(PSONames::DenoiserGradientConstruction);
 
-             auto resourceProvider = context->GetResourceProvider();
+        auto currentFrameIndex = context->FrameNumber() % 2;
+        auto resourceProvider = context->GetResourceProvider();
 
-             DenoiserGradientConstructionCBContent cbContent{};
-             cbContent.ShadingShadowedTexIdx = resourceProvider->GetSRTextureIndex(ResourceNames::StochasticShadowedShadingOutput);
-             cbContent.ShadingUnshadowedTexIdx = resourceProvider->GetSRTextureIndex(ResourceNames::StochasticUnshadowedShadingOutput);
-             cbContent.ShadingShadowedHistoryTexIdx = resourceProvider->GetSRTextureIndex(ResourceNames::StochasticShadowedShadingReprojected);
-             cbContent.ShadingUnshadowedHistoryTexIdx = resourceProvider->GetSRTextureIndex(ResourceNames::StochasticUnshadowedShadingReprojected);
-             cbContent.ShadingShadowedGradientTexIdx = resourceProvider->GetUATextureIndex(ResourceNames::StochasticShadowedShadingGradient);
-             cbContent.ShadingUnshadowedGradientTexIdx = resourceProvider->GetUATextureIndex(ResourceNames::StochasticUnshadowedShadingGradient);
+        DenoiserGradientConstructionCBContent cbContent{};
+        cbContent.GradientInputsTexIdx = resourceProvider->GetSRTextureIndex(ResourceNames::DenoiserPrimaryGradientInputs);
+        cbContent.SamplePositionsTexIdx = resourceProvider->GetSRTextureIndex(ResourceNames::DenoiserGradientSamplePositions[currentFrameIndex]);
+        cbContent.ShadowedShadingTexIdx = resourceProvider->GetSRTextureIndex(ResourceNames::StochasticShadowedShadingPreBlurred);
+        cbContent.UnshadowedShadingTexIdx = resourceProvider->GetSRTextureIndex(ResourceNames::StochasticUnshadowedShadingPreBlurred);
+        cbContent.GradientTexIdx = resourceProvider->GetUATextureIndex(ResourceNames::DenoiserPrimaryGradient);
 
-             context->GetConstantsUpdater()->UpdateRootConstantBuffer(cbContent);
-             context->GetCommandRecorder()->Dispatch(context->GetDefaultRenderSurfaceDesc().Dimensions(), { 16, 16 });*/
+        const Geometry::Dimensions& outputDimensions = resourceProvider->GetTextureProperties(ResourceNames::DenoiserPrimaryGradient).Dimensions;
+
+        context->GetConstantsUpdater()->UpdateRootConstantBuffer(cbContent);
+        context->GetCommandRecorder()->Dispatch(outputDimensions, { 16, 16 });
     }
 
 }

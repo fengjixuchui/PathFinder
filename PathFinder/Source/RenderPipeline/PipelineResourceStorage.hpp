@@ -47,8 +47,9 @@ namespace PathFinder
         using DebugBufferIteratorFunc = std::function<void(PassName passName, const float* debugData)>;
         using SchedulingInfoConfigurator = std::function<void(PipelineResourceSchedulingInfo&)>;
 
-        const HAL::RTDescriptor* GetRenderTargetDescriptor(Foundation::Name resourceName, Foundation::Name passName, uint64_t mipIndex = 0);
-        const HAL::DSDescriptor* GetDepthStencilDescriptor(Foundation::Name resourceName, Foundation::Name passName);
+        const HAL::RTDescriptor* GetRenderTargetDescriptor(Foundation::Name resourceName, Foundation::Name passName, uint64_t mipIndex = 0) const;
+        const HAL::DSDescriptor* GetDepthStencilDescriptor(Foundation::Name resourceName, Foundation::Name passName) const;
+        const HAL::SamplerDescriptor* GetSamplerDescriptor(Foundation::Name resourceName) const;
 
         void BeginFrame();
         void EndFrame();
@@ -81,30 +82,35 @@ namespace PathFinder
         void IterateDebugBuffers(const DebugBufferIteratorFunc& func) const;
 
         void QueueTextureAllocationIfNeeded(
-            ResourceName resourceName,
-            HAL::FormatVariant format,
-            HAL::TextureKind kind,
-            const Geometry::Dimensions& dimensions,
-            const HAL::ClearValue& optimizedClearValue,
-            uint16_t mipCount,
-            const SchedulingInfoConfigurator& siConfigurator
-        );
+            ResourceName resourceName, 
+            const HAL::TextureProperties& properties, 
+            std::optional<Foundation::Name> propertyCopySourceName,
+            const SchedulingInfoConfigurator& siConfigurator);
 
         template <class BufferDataT>
         void QueueBufferAllocationIfNeeded(
-            ResourceName resourceName,
-            uint64_t capacity,
-            uint64_t perElementAlignment,
-            const SchedulingInfoConfigurator& siConfigurator
-        );
+            ResourceName resourceName, 
+            const HAL::BufferProperties<BufferDataT>& properties, 
+            std::optional<Foundation::Name> propertyCopySourceName,
+            const SchedulingInfoConfigurator& siConfigurator);
 
         void QueueResourceUsage(ResourceName resourceName, std::optional<ResourceName> aliasName, const SchedulingInfoConfigurator& siConfigurator);
+        void AddSampler(Foundation::Name samplerName, const HAL::Sampler& sampler);
 
     private:
+        using SamplerDescriptorPair = std::pair<HAL::Sampler, Memory::PoolDescriptorAllocator::SamplerDescriptorPtr>;
         using ResourceMap = robin_hood::unordered_flat_map<ResourceName, uint64_t>;
+        using SamplerMap = robin_hood::unordered_flat_map<ResourceName, SamplerDescriptorPair>;
         using ResourceAliasMap = robin_hood::unordered_flat_map<ResourceName, ResourceName>;
         using ResourceList = std::vector<PipelineResourceStorageResource>;
         using DiffEntryList = std::vector<PipelineResourceStorageResource::DiffEntry>;
+
+        struct ResourceCreationRequest
+        {
+            HAL::ResourcePropertiesVariant ResourceProperties;
+            Foundation::Name ResourceName;
+            Foundation::Name ResourceNameToCopyPropertiesFrom;
+        };
 
         struct SchedulingRequest
         {
@@ -113,6 +119,7 @@ namespace PathFinder
         };
 
         PipelineResourceStorageResource& CreatePerResourceData(ResourceName name, const HAL::ResourceFormat& resourceFormat);
+        HAL::Heap* GetHeapForAliasingGroup(HAL::HeapAliasingGroup group);
 
         bool TransferPreviousFrameResources();
 
@@ -142,9 +149,10 @@ namespace PathFinder
 
         robin_hood::unordered_node_map<PassName, PipelineResourceStoragePass> mPerPassData;
 
-        std::vector<std::function<void()>> mAllocationActions;
         std::vector<SchedulingRequest> mSchedulingCreationRequests;
         std::vector<SchedulingRequest> mSchedulingUsageRequests;
+        std::vector<ResourceCreationRequest> mPrimaryResourceCreationRequests;
+        std::vector<ResourceCreationRequest> mSecondaryResourceCreationRequests;
 
         // Two sets of resources: current and previous frame
         std::pair<ResourceList, ResourceList> mResourceLists;
@@ -154,6 +162,7 @@ namespace PathFinder
         ResourceMap* mPreviousFrameResourceMap = &mResourceMaps.first;
         ResourceMap* mCurrentFrameResourceMap = &mResourceMaps.second;
         ResourceAliasMap mAliasMap;
+        SamplerMap mSamplers;
 
         // Resource diff entries to determine resource allocation needs
         std::pair<DiffEntryList, DiffEntryList> mDiffEntries;

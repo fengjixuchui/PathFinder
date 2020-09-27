@@ -2,10 +2,16 @@
 #define _SpecularDenoiser__
 
 #include "GBuffer.hlsl"
+#include "DenoiserCommon.hlsl"
+#include "Matrix.hlsl"
+#include "Random.hlsl"
+#include "ColorConversion.hlsl"
+#include "ThreadGroupTilingX.hlsl"
 
 struct PassData
 {
     GBufferTextureIndices GBufferIndices;
+    uint2 DispatchGroupCount;
     uint AccumulatedFramesCountTexIdx;
     uint ShadowedShadingHistoryTexIdx;
     uint UnshadowedShadingHistoryTexIdx;
@@ -13,14 +19,13 @@ struct PassData
     uint CurrentUnshadowedShadingTexIdx;
     uint ShadowedShadingDenoiseTargetTexIdx;
     uint UnshadowedShadingDenoiseTargetTexIdx;
+    uint PrimaryGradientTexIdx;
+    uint SecondaryGradientTexIdx;
 };
 
 #define PassDataType PassData
 
 #include "MandatoryEntryPointInclude.hlsl"
-#include "DenoiserCommon.hlsl"
-#include "Matrix.hlsl"
-#include "Random.hlsl"
 
 static const int GroupDimensionSize = 16;
 static const int DenoiseSampleCount = 8; 
@@ -38,7 +43,7 @@ float MaxAllowedAccumulatedFrames(float roughness, float NdotV, float parallax)
      
     // Controls sensitivity to parallax in general
     // Smaller values - more aggressive accumulation
-    static const float SpecularAccumulationBasePower = 0.25;
+    static const float SpecularAccumulationBasePower = 0.25; 
 
     float acos01sq = saturate(1.0 - NdotV); // ~ "normalized acos" ^ 2
     float a = pow(acos01sq, SpecularAccumulationCurve);
@@ -47,6 +52,15 @@ float MaxAllowedAccumulatedFrames(float roughness, float NdotV, float parallax)
     float power = SpecularAccumulationBasePower * (1.0 + parallax * angularSensitivity);
 
     return MaxAccumulatedFrames * pow(roughness, power);
+}
+
+float MaxAllowedAccumulatedFrames(float gradient, float roughness)
+{
+    // Tweak to find balance of lag and noise. 
+    float Antilag = 5;    
+    float Power = lerp(1.0, 5.0, roughness);
+
+    return MaxAccumulatedFrames * pow(1.0 - saturate(Antilag * gradient), Power) + 1.0;
 }
 
 float3x3 SamplingBasis(float3 Xview, float3 Nview, float roughness, float radiusScale, float normAccumFrameCount)
@@ -71,10 +85,10 @@ float3x3 SamplingBasis(float3 Xview, float3 Nview, float roughness, float radius
 }
 
 [numthreads(GroupDimensionSize, GroupDimensionSize, 1)]
-void CSMain(int3 dispatchThreadID : SV_DispatchThreadID, int3 groupThreadID : SV_GroupThreadID)
+void CSMain(uint3 groupThreadID : SV_GroupThreadID, uint3 groupID : SV_GroupID)
 {
-    uint2 pixelIndex = dispatchThreadID.xy;
-    float2 uv = (float2(pixelIndex) + 0.5) / (GlobalDataCB.PipelineRTResolution);
+    uint2 pixelIndex = ThreadGroupTilingX(PassDataCB.DispatchGroupCount, GroupDimensionSize.xx, 16, groupThreadID.xy, groupID.xy);
+    float2 uv = TexelIndexToUV(pixelIndex, GlobalDataCB.PipelineRTResolution);
 
     GBufferTexturePack gBufferTextures;
     gBufferTextures.NormalRoughness = Textures2D[PassDataCB.GBufferIndices.NormalRoughnessTexIdx];
@@ -87,30 +101,33 @@ void CSMain(int3 dispatchThreadID : SV_DispatchThreadID, int3 groupThreadID : SV
     Texture2D currentUnshadowedShadingTexture = Textures2D[PassDataCB.CurrentUnshadowedShadingTexIdx];
     Texture2D shadowedShadingHistoryTexture = Textures2D[PassDataCB.ShadowedShadingHistoryTexIdx];
     Texture2D unshadowedShadingHistoryTexture = Textures2D[PassDataCB.UnshadowedShadingHistoryTexIdx];
+    Texture2D shadingGradientTexture = Textures2D[PassDataCB.PrimaryGradientTexIdx];
 
     RWTexture2D<float4> shadowedShadingDenoiseTargetTexture = RW_Float4_Textures2D[PassDataCB.ShadowedShadingDenoiseTargetTexIdx];
     RWTexture2D<float4> unshadowedShadingDenoiseTargetTexture = RW_Float4_Textures2D[PassDataCB.UnshadowedShadingDenoiseTargetTexIdx];
+    RWTexture2D<float4> secondaryGradientTexture = RW_Float4_Textures2D[PassDataCB.SecondaryGradientTexIdx];
 
     float accumFramesCount = accumulatedFramesCountTexture.Load(uint3(pixelIndex, 0)).r;
     float depth = gBufferTextures.DepthStencil.Load(uint3(pixelIndex, 0)).r;
-
-    if (depth >= 1.0)
-    {
-        shadowedShadingDenoiseTargetTexture[pixelIndex].rgb = 0.0;
-        unshadowedShadingDenoiseTargetTexture[pixelIndex].rgb = 0.0;
-        return;
-    }
-
-    float3 motion = 0.0;// LoadGBufferMotion(gBufferTextures.Motion, pixelIndex);
-    float frameTime = 1.0 / 60.0; // TODO: pass from CPU
-
-    float3 worldPosition, viewPosition; 
-    ReconstructPositions(depth, uv, FrameDataCB.CurrentFrameCamera, viewPosition, worldPosition);
 
     float roughness;
     float3 worldNormal;
 
     LoadGBufferNormalAndRoughness(gBufferTextures.NormalRoughness, pixelIndex, worldNormal, roughness);
+
+    if (depth >= 1.0 || roughness == 0.0)
+    {
+        shadowedShadingDenoiseTargetTexture[pixelIndex].rgb = 0.0;
+        unshadowedShadingDenoiseTargetTexture[pixelIndex].rgb = 0.0;
+        secondaryGradientTexture[pixelIndex].rg = 0.0;
+        return;
+    }
+
+    float3 motion = LoadGBufferMotion(gBufferTextures.Motion, pixelIndex);
+    float frameTime = 1.0 / 60.0; // TODO: pass from CPU
+
+    float3 worldPosition, viewPosition;
+    NDCDepthToViewAndWorldPositions(depth, uv, FrameDataCB.CurrentFrameCamera, viewPosition, worldPosition);
 
     // Compute algorithm inputs
     float3 viewNormal = mul(ReduceTo3x3(FrameDataCB.CurrentFrameCamera.View), worldNormal);
@@ -125,19 +142,38 @@ void CSMain(int3 dispatchThreadID : SV_DispatchThreadID, int3 groupThreadID : SV
     // Measure of relative surface-camera motion.
     float parallax = length(movemenDelta) / (distanceToPoint * frameTime);
 
-    // Decrease maximum frame number on surface motion which will effectively decrease history weight,
+    // Decrease maximum frame number on surface motion and on lighting invalidation,
+    // which will effectively decrease history weight,
     // which is mandatory to combat ghosting
-    float maxAllowedAccumFrames = MaxAllowedAccumulatedFrames(roughness, NdotV, parallax);
-    //accumFramesCount = min(accumFramesCount, maxAllowedAccumFrames);
-    float accumFramesCountNorm = accumFramesCount / maxAllowedAccumFrames;
-    float accumulationSpeed = 1.0 / (1.0 + accumFramesCount);
+    float2 gradients = shadingGradientTexture[pixelIndex * GradientUpscaleCoefficientInv].rg;
+
+    // Just use the largest value to avoid denoising with separate kernels.
+    // We have enough bandwidth pressure as it is.
+    float gradient = max(gradients.x, gradients.y);
+
+    // Adjust the history length, taking the antilag factors into account
+    float maxAccFramesDueToGradient = MaxAllowedAccumulatedFrames(gradient, roughness);
+    float maxAccFramesDueToMovement = MaxAllowedAccumulatedFrames(roughness, NdotV, parallax);
+
+    float accumFramesCountAdjusted = min(accumFramesCount, MaxAccumulatedFrames);
+
+    if (FrameDataCB.IsDenoiserAntilagEnabled)
+    {
+        accumFramesCountAdjusted = min(min(accumFramesCount, maxAccFramesDueToGradient), maxAccFramesDueToMovement);
+    }
+
+    float accumFramesCountNorm = accumFramesCountAdjusted / MaxAccumulatedFrames;
+    float accumulationSpeed = 1.0 / (1.0 + accumFramesCountAdjusted);
 
     // Define blur radius range
-    const float MinBlurRadius = 0.01;
-    const float MaxBlurRadius = 0.1;
+    const float MinBlurRadius = 0.03;
+    const float MaxBlurRadius = 0.2;
     
     // Decrease blur radius as more frames are accumulated
-    float blurRadius = lerp(MinBlurRadius, MaxBlurRadius, 1.0 - accumFramesCountNorm);
+    float blurRadius = lerp(MinBlurRadius, MaxBlurRadius, accumulationSpeed);
+
+    // Adjust radius based on distance from camera to maintain same perceptible blur radius.
+    blurRadius *= viewPosition.z * 0.07;
 
     // Prepare sampling basis which is a scale and rotation matrix
     float3x3 samplingBasis = SamplingBasis(viewPosition, viewNormal, roughness, blurRadius, accumFramesCountNorm);
@@ -151,50 +187,72 @@ void CSMain(int3 dispatchThreadID : SV_DispatchThreadID, int3 groupThreadID : SV
     
     float totalWeight = 1.0;
 
-    [unroll]
-    for (int i = 0; i < DenoiseSampleCount; ++i)
+    if (FrameDataCB.IsDenoiserEnabled)
     {
-        // Generate sample in 2D
-        float2 vdSample = VogelDiskSample(i, DenoiseSampleCount, vogelDiskRotation);
+        [unroll]
+        for (int i = 0; i < DenoiseSampleCount; ++i)
+        {
+            // Generate sample in 2D
+            float2 vdSample = VogelDiskSample(i, DenoiseSampleCount, vogelDiskRotation);
 
-        // Make sample 3D and z-alighned
-        float3 vd3DSample = float3(vdSample, 0.0);
+            // Make sample 3D and z-alighned
+            float3 vd3DSample = float3(vdSample, 0.0);
 
-        // Transform sample into its basis.
-        // Then position it around surface point in camera view space.
-        float3 viewSpaceSample = mul(samplingBasis, vd3DSample) + viewPosition;
+            // Transform sample into its basis.
+            // Then position it around surface point in camera view space.
+            float3 viewSpaceSample = mul(samplingBasis, vd3DSample) + viewPosition;
 
-        // Project and obtain sample's UV
-        float3 projectedSample = ProjectPoint(viewSpaceSample, FrameDataCB.CurrentFrameCamera);
-        float2 sampleUV = NDCToUV(projectedSample);
+            // Project and obtain sample's UV
+            float3 projectedSample = Project(viewSpaceSample, FrameDataCB.CurrentFrameCamera);
+            float2 sampleUV = NDCToUV(projectedSample);
 
-        // Get neighbor properties
-        float4 neighborNormalRoughness = gBufferTextures.NormalRoughness.SampleLevel(LinearClampSampler, sampleUV, 0);
+            // Now that we know screen-space sample location, we need to obtain view-space 3d position of 
+            // a surface that lives at that location. We basically need to cast a ray through sample UV into depth buffer.
+            // Unprojection will do just what we need.
+            float neightborDepth = gBufferTextures.DepthStencil.SampleLevel(LinearClampSampler(), sampleUV, 0).r;
+            float3 neighborViewPos = NDCDepthToViewPosition(neightborDepth, sampleUV, FrameDataCB.CurrentFrameCamera);
 
-        float3 neighborNormal = ExpandGBufferNormal(neighborNormalRoughness.xyz);
-        float neighborRoughness = neighborNormalRoughness.w;
+            // Get neighbor properties
+            float4 neighborNormalRoughness = gBufferTextures.NormalRoughness.SampleLevel(LinearClampSampler(), sampleUV, 0);
 
-        // Compute weights
-        float normalWeight = NormalWeight(worldNormal, neighborNormal, roughness, accumFramesCount);
-        float geometryWeight = GeometryWeight(viewPosition, viewNormal, viewSpaceSample, viewPosition.z);
-        float roughnessWeight = RoughnessWeight(roughness, neighborRoughness);
+            float3 neighborNormal = ExpandGBufferNormal(neighborNormalRoughness.xyz);
+            float neighborRoughness = neighborNormalRoughness.w;
 
-        float sampleWeight = normalWeight * geometryWeight * roughnessWeight;
+            // Compute weights
+            float normalWeight = NormalWeight(worldNormal, neighborNormal, roughness, accumFramesCount);
+            float geometryWeight = GeometryWeight(viewPosition, viewNormal, neighborViewPos);
+            float roughnessWeight = RoughnessWeight(roughness, neighborRoughness);
 
-        // Sample neighbor value and weight accordingly
-        denoisedShadowed += currentShadowedShadingTexture.SampleLevel(LinearClampSampler, sampleUV, 0).rgb * sampleWeight;
-        denoisedUnshadowed += currentUnshadowedShadingTexture.SampleLevel(LinearClampSampler, sampleUV, 0).rgb * sampleWeight;
+            float sampleWeight = normalWeight * geometryWeight * roughnessWeight;
 
-        totalWeight += sampleWeight;
+            // Sample neighbor value and weight accordingly
+            denoisedShadowed += currentShadowedShadingTexture.SampleLevel(LinearClampSampler(), sampleUV, 0).rgb * sampleWeight;
+            denoisedUnshadowed += currentUnshadowedShadingTexture.SampleLevel(LinearClampSampler(), sampleUV, 0).rgb * sampleWeight;
+
+            totalWeight += sampleWeight;
+        }
+
+        denoisedShadowed /= totalWeight;
+        denoisedUnshadowed /= totalWeight;
+
+        float3 shadowedShadingHistory = shadowedShadingHistoryTexture[pixelIndex].rgb;
+        float3 unshadowedShadingHistory = unshadowedShadingHistoryTexture[pixelIndex].rgb;
+
+        // Combine with history
+        denoisedShadowed = lerp(shadowedShadingHistory, denoisedShadowed, accumulationSpeed);
+        denoisedUnshadowed = lerp(unshadowedShadingHistory, denoisedUnshadowed, accumulationSpeed);
+
+        float2 secondaryGradients = float2(
+            GetHFGradient(CIELuminance(shadowedShadingHistory), CIELuminance(denoisedShadowed)),
+            GetHFGradient(CIELuminance(unshadowedShadingHistory), CIELuminance(denoisedUnshadowed)));
+
+        secondaryGradientTexture[pixelIndex].rg = secondaryGradients;
     }
 
-    denoisedShadowed /= totalWeight;
-    denoisedUnshadowed /= totalWeight;
+    if (FrameDataCB.IsReprojectionHistoryDebugEnabled) secondaryGradientTexture[pixelIndex].rg = accumFramesCount / MaxAccumulatedFrames;
+    if (FrameDataCB.IsGradientDebugEnabled) secondaryGradientTexture[pixelIndex].rg = maxAccFramesDueToGradient / MaxAccumulatedFrames;
+    if (FrameDataCB.IsMotionDebugEnabled) secondaryGradientTexture[pixelIndex].rg = maxAccFramesDueToMovement / MaxAccumulatedFrames;
 
-    // Combine with history
-    denoisedShadowed = lerp(shadowedShadingHistoryTexture[pixelIndex].rgb, denoisedShadowed, accumulationSpeed);
-    denoisedUnshadowed = lerp(unshadowedShadingHistoryTexture[pixelIndex].rgb, denoisedUnshadowed, accumulationSpeed);
-    
     // Output final denoised value
     shadowedShadingDenoiseTargetTexture[pixelIndex].rgb = denoisedShadowed;
     unshadowedShadingDenoiseTargetTexture[pixelIndex].rgb = denoisedUnshadowed;

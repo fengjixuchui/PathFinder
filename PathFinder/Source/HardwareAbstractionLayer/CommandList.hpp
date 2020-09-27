@@ -43,6 +43,8 @@ namespace HAL
         void Reset();
         void Close();
 
+        void SetDebugName(const std::string& name) override;
+
     protected:
         CommandAllocator* mCommandAllocator = nullptr;
         Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList4> mList;
@@ -97,6 +99,7 @@ namespace HAL
         void SetComputeRootUnorderedAccessResource(const Resource& resource, uint32_t rootParameterIndex);
         void SetComputeRootDescriptorTable(DescriptorAddress tableStartAddress, uint32_t rootParameterIndex);
         void SetDescriptorHeap(const CBSRUADescriptorHeap& heap);
+        void SetDescriptorHeaps(const CBSRUADescriptorHeap& cbsruaHeap, const SamplerDescriptorHeap& samplerHeap);
         void Dispatch(uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ);
         void DispatchRays(const RayDispatchInfo& dispatchInfo);
     };

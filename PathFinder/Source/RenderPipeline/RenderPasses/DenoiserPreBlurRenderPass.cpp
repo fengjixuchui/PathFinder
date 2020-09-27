@@ -40,8 +40,8 @@ namespace PathFinder
 
         Geometry::Dimensions dispatchDimensions = resourceProvider->GetTextureProperties(inputName).Dimensions;
 
-        BlurCBContent cbContent{};
-        cbContent.BlurRadius = 5;
+        SeparableBlurCBContent cbContent{};
+        cbContent.BlurRadius = context->GetContent()->GetSettings()->IsDenoiserEnabled ? 2 : 0;
         cbContent.IsHorizontal = true;
         cbContent.Weights.fill(1.0f / cbContent.BlurRadius);
         auto kernel = Foundation::Gaussian::Kernel1D(cbContent.BlurRadius);

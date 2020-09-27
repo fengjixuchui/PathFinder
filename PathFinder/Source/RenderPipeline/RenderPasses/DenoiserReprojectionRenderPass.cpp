@@ -25,21 +25,14 @@ namespace PathFinder
         frameCountProperties.ShaderVisibleFormat = HAL::ColorFormat::R16_Float;
         frameCountProperties.Flags = ResourceScheduler::Flags::CrossFrameRead;
 
-        ResourceScheduler::NewTextureProperties gradientProperties{ HAL::ColorFormat::RG16_Float };
-
-        ResourceScheduler::NewTextureProperties gradientNormFactorProperties{ HAL::ColorFormat::RG16_Float };
-        gradientNormFactorProperties.MipCount = ResourceScheduler::FullMipChain;
-        
         scheduler->NewTexture(ResourceNames::DenoiserReprojectedFramesCount[frameIndex], frameCountProperties);
         scheduler->NewTexture(ResourceNames::DenoiserReprojectedFramesCount[previousFrameIndex], ResourceScheduler::MipSet::Empty(), frameCountProperties);
         scheduler->NewTexture(ResourceNames::StochasticShadowedShadingReprojected);
         scheduler->NewTexture(ResourceNames::StochasticUnshadowedShadingReprojected);
 
-        scheduler->NewTexture(ResourceNames::StochasticShadingGradient, gradientProperties);
-        scheduler->NewTexture(ResourceNames::StochasticShadingGradientNormFactor, gradientNormFactorProperties);
-
         scheduler->ReadTexture(ResourceNames::GBufferNormalRoughness);
         scheduler->ReadTexture(ResourceNames::GBufferDepthStencil);
+        scheduler->ReadTexture(ResourceNames::GBufferMotionVector);
         scheduler->ReadTexture(ResourceNames::GBufferViewDepth[previousFrameIndex]);
         scheduler->ReadTexture(ResourceNames::GBufferViewDepth[frameIndex]);
         scheduler->ReadTexture(ResourceNames::DenoiserReprojectedFramesCount[previousFrameIndex]);
@@ -58,9 +51,13 @@ namespace PathFinder
         auto previousFrameIndex = (context->FrameNumber() - 1) % 2;
         auto frameIndex = context->FrameNumber() % 2;
 
+        auto groupCount = CommandRecorder::DispatchGroupCount(context->GetDefaultRenderSurfaceDesc().Dimensions(), { 16, 16 });
+
         DenoiserReprojectionCBContent cbContent{};
+        cbContent.DispatchGroupCount = { groupCount.Width, groupCount.Height };
         cbContent.GBufferNormalRoughnessTexIdx = resourceProvider->GetSRTextureIndex(ResourceNames::GBufferNormalRoughness);
         cbContent.DepthTexIdx = resourceProvider->GetSRTextureIndex(ResourceNames::GBufferDepthStencil);
+        cbContent.MotionTexIdx = resourceProvider->GetSRTextureIndex(ResourceNames::GBufferMotionVector);
         cbContent.PreviousViewDepthTexIdx = resourceProvider->GetSRTextureIndex(ResourceNames::GBufferViewDepth[previousFrameIndex]);
         cbContent.CurrentViewDepthTexIdx = resourceProvider->GetSRTextureIndex(ResourceNames::GBufferViewDepth[frameIndex]);
         cbContent.PreviousAccumulationCounterTexIdx = resourceProvider->GetSRTextureIndex(ResourceNames::DenoiserReprojectedFramesCount[previousFrameIndex]);
@@ -71,11 +68,10 @@ namespace PathFinder
         cbContent.UnshadowedShadingTexIdx = resourceProvider->GetSRTextureIndex(ResourceNames::StochasticUnshadowedShadingPreBlurred);
         cbContent.ShadowedShadingReprojectionTargetTexIdx = resourceProvider->GetUATextureIndex(ResourceNames::StochasticShadowedShadingReprojected);
         cbContent.UnshadowedShadingReprojectionTargetTexIdx = resourceProvider->GetUATextureIndex(ResourceNames::StochasticUnshadowedShadingReprojected);
-        cbContent.ShadingGradientTexIdx = resourceProvider->GetUATextureIndex(ResourceNames::StochasticShadingGradient);
-        cbContent.ShadingGradientNormFactorTexIdx = resourceProvider->GetUATextureIndex(ResourceNames::StochasticShadingGradientNormFactor);
+        //cbContent.ShadingGradientTexIdx = resourceProvider->GetUATextureIndex(ResourceNames::StochasticShadingGradient);
 
         context->GetConstantsUpdater()->UpdateRootConstantBuffer(cbContent);
-        context->GetCommandRecorder()->Dispatch(context->GetDefaultRenderSurfaceDesc().Dimensions(), { 16, 16 });
+        context->GetCommandRecorder()->Dispatch(groupCount.Width, groupCount.Height);
     }
 
 }

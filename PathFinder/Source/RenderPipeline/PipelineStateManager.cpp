@@ -315,6 +315,8 @@ namespace PathFinder
 
     void PipelineStateManager::AddCommonRootSignatureParameters(HAL::RootSignature& signature) const
     {
+        // Must match BaseEngineLayout.hlsl
+
         // Global data CB
         signature.AddDescriptorParameter(HAL::RootConstantBufferParameter{ 0, 10 });
 
@@ -359,27 +361,33 @@ namespace PathFinder
         RWTextures2DUInt4.AddDescriptorRange(HAL::UADescriptorTableRange{ 0, 11 });
         signature.AddDescriptorTableParameter(RWTextures2DUInt4);
 
+        // Unbounded RWTexture2D<uint> range
+        HAL::RootDescriptorTableParameter RWTextures2DUInt;
+        RWTextures2DUInt.AddDescriptorRange(HAL::UADescriptorTableRange{ 0, 12 });
+        signature.AddDescriptorTableParameter(RWTextures2DUInt);
+
         // Unbounded RWTexture3D range
         HAL::RootDescriptorTableParameter RWTextures3D;
-        RWTextures3D.AddDescriptorRange(HAL::UADescriptorTableRange{ 0, 12 });
+        RWTextures3D.AddDescriptorRange(HAL::UADescriptorTableRange{ 0, 13 });
         signature.AddDescriptorTableParameter(RWTextures3D);
 
         // Unbounded RWTexture3D<uint4> range
         HAL::RootDescriptorTableParameter RWTextures3DUInt4;
-        RWTextures3DUInt4.AddDescriptorRange(HAL::UADescriptorTableRange{ 0, 13 });
+        RWTextures3DUInt4.AddDescriptorRange(HAL::UADescriptorTableRange{ 0, 14 });
         signature.AddDescriptorTableParameter(RWTextures3DUInt4);
 
         // Unbounded RWTexture2DArray range
         HAL::RootDescriptorTableParameter RWTexture2DArrays;
-        RWTexture2DArrays.AddDescriptorRange(HAL::UADescriptorTableRange{ 0, 14 });
+        RWTexture2DArrays.AddDescriptorRange(HAL::UADescriptorTableRange{ 0, 15 });
         signature.AddDescriptorTableParameter(RWTexture2DArrays);
 
-        signature.AddStaticSampler(HAL::StaticSampler::AnisotropicClamp(0));
-        signature.AddStaticSampler(HAL::StaticSampler::LinearClamp(1));
-        signature.AddStaticSampler(HAL::StaticSampler::PointClamp(2));
+        // Unbounded Samplers range
+        HAL::RootDescriptorTableParameter samplers;
+        samplers.AddDescriptorRange(HAL::SamplerDescriptorTableRange{ 0, 10 });
+        signature.AddDescriptorTableParameter(samplers);
 
         // Debug readback buffer
-        HAL::RootUnorderedAccessParameter debugBuffer{ 0, 15 };
+        HAL::RootUnorderedAccessParameter debugBuffer{ 0, 16 };
         signature.AddDescriptorParameter(debugBuffer);
     }
 
@@ -411,7 +419,7 @@ namespace PathFinder
 
         // Re associate states 
         mShaderToPSOAssociations[newShader] = std::move(associationsIt->second);
-        mShaderToPSOAssociations.erase(associationsIt);
+        mShaderToPSOAssociations.erase(oldShader);
     }
 
     void PipelineStateManager::RecompileStatesWithNewLibrary(const HAL::Library* oldLibrary, const HAL::Library* newLibrary)
@@ -432,7 +440,7 @@ namespace PathFinder
 
         // Re associate states 
         mLibraryToPSOAssociations[newLibrary] = std::move(associationsIt->second);
-        mLibraryToPSOAssociations.erase(associationsIt);
+        mLibraryToPSOAssociations.erase(oldLibrary);
     }
 
 }

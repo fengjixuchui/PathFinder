@@ -6,7 +6,7 @@ namespace PathFinder
 {
 
     PipelineResourceSchedulingInfo::PipelineResourceSchedulingInfo(Foundation::Name resourceName, const HAL::ResourceFormat& format)
-        : mResourceFormat{ format }, mResourceName{ resourceName }, mSubresourceCount{ format.SubresourceCount() }
+        : mResourceFormat{ format }, mResourceName{ resourceName }, mCombinedResourceNames{ resourceName.ToString() }, mSubresourceCount{ format.SubresourceCount() }
     {
         mSubresourceCombinedReadStates.resize(mSubresourceCount);
     }
@@ -19,6 +19,7 @@ namespace PathFinder
     void PipelineResourceSchedulingInfo::AddNameAlias(Foundation::Name alias)
     {
         mAliases.push_back(alias);
+        mCombinedResourceNames += " | " + alias.ToString();
     }
 
     void PipelineResourceSchedulingInfo::ApplyExpectedStates()
@@ -59,7 +60,7 @@ namespace PathFinder
         {
             mSubresourceCombinedReadStates[subresourceIndex] |= state;
         }
-        else if (EnumMaskBitSet(state, HAL::ResourceState::UnorderedAccess))
+        else if (EnumMaskEquals(state, HAL::ResourceState::UnorderedAccess))
         {
             passInfo.NeedsUnorderedAccessBarrier = true;
         }

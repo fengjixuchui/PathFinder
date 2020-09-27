@@ -6,11 +6,14 @@
 #include "Utils.hlsl"
 #include "Filtering.hlsl"
 #include "ColorConversion.hlsl"
+#include "ThreadGroupTilingX.hlsl"
 
 struct PassData
 {
+    uint2 DispatchGroupCount;
     uint GBufferNormalRoughnessTexIdx;
     uint DepthTexIdx;
+    uint MotionTexIdx;
     uint CurrentViewDepthTexIdx;
     uint PreviousViewDepthTexIdx;
     uint CurrentAccumulationCounterTexIdx;
@@ -22,7 +25,6 @@ struct PassData
     uint ShadowedShadingReprojectionTargetTexIdx;
     uint UnshadowedShadingReprojectionTargetTexIdx;
     uint ShadingGradientTexIdx;
-    uint ShadingGradientNormFactorTexIdx;
 };
 
 #define PassDataType PassData
@@ -33,17 +35,18 @@ static const int GroupDimensionSize = 16;
 static const float DisocclusionThreshold = 0.01;
 
 [numthreads(GroupDimensionSize, GroupDimensionSize, 1)]
-void CSMain(int3 dispatchThreadID : SV_DispatchThreadID, int3 groupThreadID : SV_GroupThreadID)
+void CSMain(uint3 groupThreadID : SV_GroupThreadID, uint3 groupID : SV_GroupID)
 {
     //------------------------------------//
     // Ghosting free history reprojection //
     //------------------------------------//
 
-    uint2 pixelIndex = dispatchThreadID.xy;
-    float2 uv = (float2(pixelIndex) + 0.5) * GlobalDataCB.PipelineRTResolutionInv; 
+    uint2 pixelIndex = ThreadGroupTilingX(PassDataCB.DispatchGroupCount, GroupDimensionSize.xx, 16, groupThreadID.xy, groupID.xy);
+    float2 uv = TexelIndexToUV(pixelIndex, GlobalDataCB.PipelineRTResolution);
 
     Texture2D normalRoughnessTexture = Textures2D[PassDataCB.GBufferNormalRoughnessTexIdx];
     Texture2D depthTexture = Textures2D[PassDataCB.DepthTexIdx];
+    Texture2D<uint4> motionTexture = UInt4_Textures2D[PassDataCB.MotionTexIdx];
     Texture2D prevViewDepthTexture = Textures2D[PassDataCB.PreviousViewDepthTexIdx];
     Texture2D currentViewDepthTexture = Textures2D[PassDataCB.CurrentViewDepthTexIdx];
     Texture2D prevAccumulationCounterTexture = Textures2D[PassDataCB.PreviousAccumulationCounterTexIdx];
@@ -56,23 +59,22 @@ void CSMain(int3 dispatchThreadID : SV_DispatchThreadID, int3 groupThreadID : SV
     RWTexture2D<float4> shadowedShadingReprojectionTarget = RW_Float4_Textures2D[PassDataCB.ShadowedShadingReprojectionTargetTexIdx];
     RWTexture2D<float4> unshadowedShadingReprojectionTarget = RW_Float4_Textures2D[PassDataCB.UnshadowedShadingReprojectionTargetTexIdx];
     RWTexture2D<float4> shadingGradientTarget = RW_Float4_Textures2D[PassDataCB.ShadingGradientTexIdx];
-    RWTexture2D<float4> shadingGradientNormFactorTarget = RW_Float4_Textures2D[PassDataCB.ShadingGradientNormFactorTexIdx];
 
     float roughness;
     float3 surfaceNormal;
     LoadGBufferNormalAndRoughness(normalRoughnessTexture, pixelIndex, surfaceNormal, roughness);
 
     float currentDepth = depthTexture.Load(uint3(pixelIndex, 0)).r;
-    float3 currentPosition = ReconstructWorldSpacePosition(currentDepth, uv, FrameDataCB.CurrentFrameCamera);
-    float3 motionVector = float3(0.0, 0.0, 0.0); // TODO: Implement motion vectors
+    float3 currentPosition = NDCDepthToWorldPosition(currentDepth, uv, FrameDataCB.CurrentFrameCamera);
+    float3 motionVector = LoadGBufferMotion(motionTexture, pixelIndex);
     float3 previousPosition = currentPosition - motionVector;
-    float3 reprojectedCoord = ViewProjectPoint(previousPosition, FrameDataCB.PreviousFrameCamera); 
+    float3 reprojectedCoord = ViewProject(previousPosition, FrameDataCB.PreviousFrameCamera); 
     float2 reprojectedUV = NDCToUV(reprojectedCoord);
 
     // Custom binary weights based on disocclusion help us get rid of ghosting
     Bilinear bilinearFilterAtPrevPos = GetBilinearFilter(reprojectedUV, GlobalDataCB.PipelineRTResolutionInv, GlobalDataCB.PipelineRTResolution);
 
-    float4 viewDepthPrev = GatherRedManually(prevViewDepthTexture, bilinearFilterAtPrevPos, 0.0, PointClampSampler);
+    float4 viewDepthPrev = GatherRedManually(prevViewDepthTexture, bilinearFilterAtPrevPos, 0.0, PointClampSampler());
 
     // Compute disocclusion
     float4 isInScreen = float4(
@@ -88,7 +90,7 @@ void CSMain(int3 dispatchThreadID : SV_DispatchThreadID, int3 groupThreadID : SV
 
     // Distance to plane for each sampled view depth
     float NoVprev = NoXprev / previousViewPosition.z;
-    float4 planeDist = abs(NoVprev * viewDepthPrev - NoXprev);  
+    float4 planeDist = abs(NoVprev * viewDepthPrev - NoXprev);   
 
     // Relative distance determines occlusion
     float4 occlusion = step(DisocclusionThreshold, planeDist / NoXprev);
@@ -98,7 +100,7 @@ void CSMain(int3 dispatchThreadID : SV_DispatchThreadID, int3 groupThreadID : SV
 
     float4 weights = GetBilinearCustomWeights(bilinearFilterAtPrevPos, occlusion);
 
-    float4 accumCountPrev = GatherRedManually(prevAccumulationCounterTexture, bilinearFilterAtPrevPos, 0.0, PointClampSampler);
+    float4 accumCountPrev = GatherRedManually(prevAccumulationCounterTexture, bilinearFilterAtPrevPos, 0.0, PointClampSampler());
     float accumCountNew = ApplyBilinearCustomWeights(min(accumCountPrev + 1.0, MaxAccumulatedFrames), weights);
 
     // Force an aggressive counter reset when 
@@ -108,8 +110,8 @@ void CSMain(int3 dispatchThreadID : SV_DispatchThreadID, int3 groupThreadID : SV
         accumCountNew = 0.0; 
     }
 
-    GatheredRGB shadowedShadingGatherResult = GatherRGBManually(shadowedShadingHistoryTexture, bilinearFilterAtPrevPos, 0.0, PointClampSampler);
-    GatheredRGB unshadowedShadingGatherResult = GatherRGBManually(unshadowedShadingHistoryTexture, bilinearFilterAtPrevPos, 0.0, PointClampSampler);
+    GatheredRGB shadowedShadingGatherResult = GatherRGBManually(shadowedShadingHistoryTexture, bilinearFilterAtPrevPos, 0.0, PointClampSampler());
+    GatheredRGB unshadowedShadingGatherResult = GatherRGBManually(unshadowedShadingHistoryTexture, bilinearFilterAtPrevPos, 0.0, PointClampSampler());
 
     float3 shadowedShadingReprojected = float3(
         ApplyBilinearCustomWeights(shadowedShadingGatherResult.Red, weights),
@@ -121,18 +123,10 @@ void CSMain(int3 dispatchThreadID : SV_DispatchThreadID, int3 groupThreadID : SV
         ApplyBilinearCustomWeights(unshadowedShadingGatherResult.Green, weights),
         ApplyBilinearCustomWeights(unshadowedShadingGatherResult.Blue, weights));
 
-    currentAccumulationCounterTexture[pixelIndex] = accumCountNew;
     shadowedShadingReprojectionTarget[pixelIndex].rgb = shadowedShadingReprojected;
     unshadowedShadingReprojectionTarget[pixelIndex].rgb = unshadowedShadingReprojected;
 
-    float shadowedShadingLuminance = CIELuminance(shadowedShadingReprojected);
-    float unshadowedShadingLuminance = CIELuminance(unshadowedShadingReprojected);
-
-    float shadowedShadingGradient = CIELuminance(shadowedShadingTexture[pixelIndex].rgb) - shadowedShadingLuminance;
-    float unshadowedShadingGradient = CIELuminance(unshadowedShadingTexture[pixelIndex].rgb) - unshadowedShadingLuminance;
-
-    shadingGradientTarget[pixelIndex].rg = float2(abs(shadowedShadingGradient), abs(unshadowedShadingGradient));
-    shadingGradientNormFactorTarget[pixelIndex].rg = float2(shadowedShadingLuminance, unshadowedShadingLuminance);
+    currentAccumulationCounterTexture[pixelIndex] = accumCountNew;
 }
 
 #endif

@@ -41,6 +41,11 @@ namespace HAL
         }
     }
 
+    void CommandList::SetDebugName(const std::string& name)
+    {
+        mList->SetName(StringToWString(name).c_str());
+    }
+
 
 
     void CopyCommandListBase::InsertBarrier(const ResourceBarrier& barrier)
@@ -153,6 +158,13 @@ namespace HAL
     {
         auto ptr = heap.D3DHeap();
         mList->SetDescriptorHeaps(1, &ptr);
+    }
+
+    void ComputeCommandListBase::SetDescriptorHeaps(const CBSRUADescriptorHeap& cbsruaHeap, const SamplerDescriptorHeap& samplerHeap)
+    {
+        std::array<ID3D12DescriptorHeap*, 2> heaps{ cbsruaHeap.D3DHeap(), samplerHeap.D3DHeap() };
+        ID3D12DescriptorHeap* const* ppDescriptorHeaps = heaps.data();
+        mList->SetDescriptorHeaps(2, ppDescriptorHeaps);
     }
 
     void ComputeCommandListBase::Dispatch(uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ)

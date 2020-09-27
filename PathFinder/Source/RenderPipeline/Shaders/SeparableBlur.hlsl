@@ -18,6 +18,7 @@ struct PassCBData
     uint BlurRadius;
     uint InputTexIdx;
     uint OutputTexIdx;
+    uint MipLevel;
 };
 
 #define PassDataType PassCBData
@@ -29,10 +30,18 @@ groupshared float3 gCache[BlurGroupSharedBufferSize]; // Around 5KB
 [numthreads(BlurGroupSize, 1, 1)]
 void CSMain(int3 dispatchThreadID : SV_DispatchThreadID, int3 groupThreadID : SV_GroupThreadID)
 {
-    
     RWTexture2D<float4> destination = RW_Float4_Textures2D[PassDataCB.OutputTexIdx];
 
     int2 texelIndex = PassDataCB.IsHorizontal ? dispatchThreadID.xy : dispatchThreadID.yx;
+
+    if (PassDataCB.BlurRadius == 0)
+    {
+        destination[texelIndex] = PassDataCB.IsHorizontal ?
+            Textures2D[PassDataCB.InputTexIdx][texelIndex] :
+            RW_Float4_Textures2D[PassDataCB.InputTexIdx][texelIndex];
+
+        return;
+    }
 
     GSLineLoadStoreCoords loadStoreCoords = GetGSLineLoadStoreCoords(
         texelIndex, groupThreadID.x, PassDataCB.ImageSize, BlurGroupSize, PassDataCB.BlurRadius, PassDataCB.IsHorizontal
@@ -46,10 +55,10 @@ void CSMain(int3 dispatchThreadID : SV_DispatchThreadID, int3 groupThreadID : SV
         // Source texture for horizontal blur comes as SRV
         Texture2D source = Textures2D[PassDataCB.InputTexIdx];
 
-        gCache[loadStoreCoords.StoreCoord0] = source[loadStoreCoords.LoadCoord0].rgb;
+        gCache[loadStoreCoords.StoreCoord0] = source.mips[PassDataCB.MipLevel][loadStoreCoords.LoadCoord0].rgb;
 
         if (loadStoreCoords.IsLoadStore1Required)
-            gCache[loadStoreCoords.StoreCoord1] = source[loadStoreCoords.LoadCoord1].rgb;
+            gCache[loadStoreCoords.StoreCoord1] = source.mips[PassDataCB.MipLevel][loadStoreCoords.LoadCoord1].rgb;
     }
     else
     {

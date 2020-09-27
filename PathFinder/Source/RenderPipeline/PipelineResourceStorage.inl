@@ -74,46 +74,48 @@ namespace PathFinder
     }
 
     template <class BufferDataT>
-    void PipelineResourceStorage::QueueBufferAllocationIfNeeded(ResourceName resourceName, uint64_t capacity, uint64_t perElementAlignment, const SchedulingInfoConfigurator& siConfigurator)
+    void PipelineResourceStorage::QueueBufferAllocationIfNeeded(
+        ResourceName resourceName, 
+        const HAL::BufferProperties<BufferDataT>& properties, 
+        std::optional<Foundation::Name> propertyCopySourceName,
+        const SchedulingInfoConfigurator& siConfigurator)
     {
-        HAL::BufferProperties<BufferDataT> properties{ capacity, perElementAlignment };
-        HAL::ResourceFormat bufferFormat = HAL::Buffer::ConstructResourceFormat(mDevice, properties);
+        /*    HAL::ResourceFormat bufferFormat = HAL::Buffer::ConstructResourceFormat(mDevice, properties);
 
-        PipelineResourceStorageResource* resourceObjects = GetPerResourceData(resourceName);
-        assert_format(!resourceObjects, "Buffer ", resourceName.ToString(), " allocation is already requested");
-        resourceObjects = &CreatePerResourceData(resourceName, bufferFormat);
+            PipelineResourceStorageResource* resourceObjects = GetPerResourceData(resourceName);
+            assert_format(!resourceObjects, "Buffer ", resourceName.ToString(), " allocation is already requested");
+            resourceObjects = &CreatePerResourceData(resourceName, bufferFormat);
 
-        auto allocationAction = [=]()
-        {
-            HAL::Heap* heap = nullptr;
-
-            switch (resourceObjects->SchedulingInfo.ResourceFormat().ResourceAliasingGroup())
+            auto allocationAction = [=]()
             {
-            case HAL::HeapAliasingGroup::Buffers: heap = mBufferHeap.get(); break;
-            case HAL::HeapAliasingGroup::Universal: heap = mUniversalHeap.get(); break;
-            case HAL::HeapAliasingGroup::RTDSTextures:
-            case HAL::HeapAliasingGroup::NonRTDSTextures:
-                assert_format(false, "Should never be hit");
-            }
+                HAL::Heap* heap = nullptr;
 
-            HAL::BufferProperties<BufferDataT> finalProperties{
-                capacity, perElementAlignment, HAL::ResourceState::Common, resourceObjects->SchedulingInfo.ExpectedStates()
+                switch (resourceObjects->SchedulingInfo.ResourceFormat().ResourceAliasingGroup())
+                {
+                case HAL::HeapAliasingGroup::Buffers: heap = mBufferHeap.get(); break;
+                case HAL::HeapAliasingGroup::Universal: heap = mUniversalHeap.get(); break;
+                case HAL::HeapAliasingGroup::RTDSTextures:
+                case HAL::HeapAliasingGroup::NonRTDSTextures:
+                    assert_format(false, "Should never be hit");
+                }
+
+                HAL::BufferProperties<BufferDataT> finalProperties = properties;
+                finalProperties.ExpectedStateMask = resourceObjects->SchedulingInfo.ExpectedStates();
+
+                if (resourceObjects->SchedulingInfo.CanBeAliased)
+                {
+                    resourceObjects->Buffer = mResourceProducer->NewBuffer(finalProperties, *heap, resourceObjects->SchedulingInfo.HeapOffset);
+                }
+                else
+                {
+                    resourceObjects->Buffer = mResourceProducer->NewBuffer(finalProperties);
+                }
+
+                resourceObjects->Buffer->SetDebugName(resourceName.ToString());
             };
 
-            if (resourceObjects->SchedulingInfo.CanBeAliased)
-            {
-                resourceObjects->Buffer = mResourceProducer->NewBuffer(finalProperties, *heap, resourceObjects->SchedulingInfo.HeapOffset);
-            }
-            else
-            {
-                resourceObjects->Buffer = mResourceProducer->NewBuffer(finalProperties);
-            }
-
-            resourceObjects->Buffer->SetDebugName(resourceName.ToString());
-        };
-
-        mAllocationActions.push_back(allocationAction);
-        mSchedulingCreationRequests.emplace_back(siConfigurator, resourceName, std::nullopt);
+            mAllocationActions.push_back(allocationAction);
+            mSchedulingCreationRequests.emplace_back(siConfigurator, resourceName, std::nullopt);*/
     }
 
 }

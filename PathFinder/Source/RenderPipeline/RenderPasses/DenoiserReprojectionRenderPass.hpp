@@ -12,8 +12,10 @@ namespace PathFinder
 
     struct DenoiserReprojectionCBContent
     {
+        glm::uvec2 DispatchGroupCount;
         uint32_t GBufferNormalRoughnessTexIdx;
         uint32_t DepthTexIdx;
+        uint32_t MotionTexIdx;
         uint32_t CurrentViewDepthTexIdx;
         uint32_t PreviousViewDepthTexIdx;
         uint32_t CurrentAccumulationCounterTexIdx;
@@ -25,7 +27,6 @@ namespace PathFinder
         uint32_t ShadowedShadingReprojectionTargetTexIdx;
         uint32_t UnshadowedShadingReprojectionTargetTexIdx;
         uint32_t ShadingGradientTexIdx;
-        uint32_t ShadingGradientNormFactorTexIdx;
     };
 
     class DenoiserReprojectionRenderPass : public RenderPass<RenderPassContentMediator>

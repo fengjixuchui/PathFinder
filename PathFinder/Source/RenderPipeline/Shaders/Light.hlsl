@@ -142,6 +142,15 @@ LightSample ZeroLightSample()
     return lightSample;
 }
 
+LTCAnalyticEvaluationResult ZeroLTCAnalyticEvaluationResult()
+{
+    LTCAnalyticEvaluationResult result;
+    result.BRDFProbability = 0.0;
+    result.DiffuseProbability = 0.0;
+    result.OutgoingLuminance = 0.0;
+    return result;
+}
+
 float LTCSampleVectorPDF(float3x3 MInv, float MDet, float3 L)
 {
     float3 LCosine = mul(MInv, L);

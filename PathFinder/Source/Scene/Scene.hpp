@@ -49,6 +49,8 @@ namespace PathFinder
         BloomParameters mBloomParameters;
 
         Memory::GPUResourceProducer::TexturePtr mBlueNoiseTexture;
+        Memory::GPUResourceProducer::TexturePtr mSMAAAreaTexture;
+        Memory::GPUResourceProducer::TexturePtr mSMAASearchTexture;
 
         ResourceLoader mResourceLoader;
 
@@ -74,6 +76,8 @@ namespace PathFinder
         inline auto& BloomParams() { return mBloomParameters; }
 
         inline const auto BlueNoiseTexture() const { return mBlueNoiseTexture.get(); }
+        inline const auto SMAASearchTexture() const { return mSMAASearchTexture.get(); }
+        inline const auto SMAAAreaTexture() const { return mSMAAAreaTexture.get(); }
     };
 
 }

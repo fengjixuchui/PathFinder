@@ -8,15 +8,14 @@
 namespace PathFinder
 {
 
-    struct DenoiserGradientConstructionCBContent
-    {
-        uint32_t ShadingShadowedTexIdx;
-        uint32_t ShadingUnshadowedTexIdx;
-        uint32_t ShadingShadowedHistoryTexIdx;
-        uint32_t ShadingUnshadowedHistoryTexIdx;
-        uint32_t ShadingShadowedGradientTexIdx;
-        uint32_t ShadingUnshadowedGradientTexIdx;
-    };
+     struct DenoiserGradientConstructionCBContent
+     {
+         uint32_t GradientInputsTexIdx;
+         uint32_t SamplePositionsTexIdx;
+         uint32_t ShadowedShadingTexIdx;
+         uint32_t UnshadowedShadingTexIdx;
+         uint32_t GradientTexIdx;
+     };
 
     class DenoiserGradientConstructionRenderPass : public RenderPass<RenderPassContentMediator>
     { 

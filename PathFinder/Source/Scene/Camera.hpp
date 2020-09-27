@@ -16,7 +16,6 @@ namespace PathFinder
     {
     public:
         Camera();
-        Camera(float fieldOfView, float zNear, float zFar);
 
         glm::mat4 ViewProjection() const;
         glm::mat4 View() const;
@@ -38,6 +37,7 @@ namespace PathFinder
         void SetAperture(FStop aperture);
         void SetFilmSpeed(ISO filmSpeed);
         void SetShutterTime(float time);
+        void SetFieldOfView(float degrees);
 
         glm::vec3 WorldToNDC(const glm::vec3 &v) const;
 
@@ -79,6 +79,7 @@ namespace PathFinder
         inline FStop Aperture() const { return mLenseAperture; }
         inline ISO FilmSpeed() const { return mFilmSpeed; }
         inline float ShutterTime() const { return mShutterTime; }
+        inline float AspectRatio() const { return mViewportAspectRatio; }
     };
 
 }

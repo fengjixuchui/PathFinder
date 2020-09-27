@@ -25,6 +25,8 @@ StructuredBuffer<Material> MaterialTable : register(t3);
 struct VertexOut
 {
     float4 Position : SV_POSITION;
+    float3 CurrWorldPos : CURR_WORLD_POS;
+    float3 PrevWorldPos : PREV_WORLD_POS;
     float ViewDepth : VIEW_DEPTH;
     float2 UV : TEXCOORD0;  
     float3x3 TBN : TBN_MATRIX;
@@ -32,8 +34,8 @@ struct VertexOut
 
 float3x3 BuildTBNMatrix(Vertex1P1N1UV1T1BT vertex, MeshInstance instanceData)
 {
-    float3 N = mul(instanceData.ModelMatrix, float4(normalize(vertex.Normal), 0.0)).xyz;
-    float3 T = mul(instanceData.ModelMatrix, float4(normalize(vertex.Tangent), 0.0)).xyz;
+    float3 N = mul(instanceData.NormalMatrix, float4(normalize(vertex.Normal), 0.0)).xyz;
+    float3 T = mul(instanceData.NormalMatrix, float4(normalize(vertex.Tangent), 0.0)).xyz;
     float3 B = normalize(cross(N, T));
 
     return Matrix3x3ColumnMajor(T, B, N);
@@ -52,11 +54,14 @@ VertexOut VSMain(uint indexId : SV_VertexID)
     float3x3 TBN = BuildTBNMatrix(vertex, instanceData);
     float3x3 TBNInverse = transpose(TBN);
 
+    float4 prevWSPosition = mul(instanceData.PrevModelMatrix, vertex.Position);
     float4 WSPosition = mul(instanceData.ModelMatrix, vertex.Position);
     float4 CSPosition = mul(FrameDataCB.CurrentFrameCamera.View, WSPosition);
     float4 ClipSPosition = mul(FrameDataCB.CurrentFrameCamera.Projection, CSPosition);
 
     vout.Position = ClipSPosition;
+    vout.CurrWorldPos = WSPosition.xyz;
+    vout.PrevWorldPos = prevWSPosition.xyz;
     vout.ViewDepth = CSPosition.z;
     vout.UV = vertex.UV;
     vout.TBN = TBN;
@@ -68,63 +73,59 @@ VertexOut VSMain(uint indexId : SV_VertexID)
 
 float3 FetchAlbedoMap(VertexOut vertex, Material material)
 {
-    return 0.8;//
-
     Texture2D albedoMap = Textures2D[material.AlbedoMapIndex];
-    return LinearFromSRGB(albedoMap.Sample(AnisotropicClampSampler, vertex.UV).rgb);
+    return LinearFromSRGB(albedoMap.Sample(AnisotropicClampSampler(), vertex.UV).rgb);
 }
 
 float3 FetchNormalMap(VertexOut vertex, Material material)
 {
     Texture2D normalMap = Textures2D[material.NormalMapIndex];
     
-    float3 normal = normalMap.Sample(AnisotropicClampSampler, vertex.UV).xyz; 
+    float3 normal = normalMap.Sample(AnisotropicClampSampler(), vertex.UV).xyz;
     normal = normal * 2.0 - 1.0;
-
-    normal = float3(0, 0, 1); 
 
     return normalize(mul(vertex.TBN, normal));
 }
 
 float FetchMetallnessMap(VertexOut vertex, Material material)
 {
-    return 0.0;//
-
     Texture2D metalnessMap = Textures2D[material.MetalnessMapIndex];
-    return metalnessMap.Sample(AnisotropicClampSampler, vertex.UV).r; 
+    return metalnessMap.Sample(AnisotropicClampSampler(), vertex.UV).r;
 }
 
 float FetchRoughnessMap(VertexOut vertex, Material material)
 {
-    return 0.1;//
-
     Texture2D roughnessMap = Textures2D[material.RoughnessMapIndex];
-    return roughnessMap.Sample(AnisotropicClampSampler, vertex.UV).r;
+    return roughnessMap.Sample(AnisotropicClampSampler(), vertex.UV).r;
 }
 
 float FetchAOMap(VertexOut vertex, Material material)
 {
     Texture2D aoMap = Textures2D[material.AOMapIndex];
-    return aoMap.Sample(AnisotropicClampSampler, vertex.UV).r;
+    return aoMap.Sample(AnisotropicClampSampler(), vertex.UV).r;
 }
 
 float FetchDisplacementMap(VertexOut vertex, Material material)
 {
     Texture2D displacementMap = Textures2D[material.DisplacementMapIndex];
-    return displacementMap.Sample(AnisotropicClampSampler, vertex.UV).r;
+    return displacementMap.Sample(AnisotropicClampSampler(), vertex.UV).r;
 }
 
-GBufferPixelOut PSMain(VertexOut pin)
+GBufferPixelOut PSMain(VertexOut pin) 
 {
     MeshInstance instanceData = InstanceTable[RootConstantBuffer.InstanceTableIndex];
     Material material = MaterialTable[instanceData.MaterialIndex];
+
+    float3 normal = instanceData.HasTangentSpace ?
+        FetchNormalMap(pin, material) :
+        normalize(float3(pin.TBN[0][2], pin.TBN[1][2], pin.TBN[2][2]));
 
     GBufferPixelOut pixelOut = GetStandardGBufferPixelOutput(
         FetchAlbedoMap(pin, material),
         FetchMetallnessMap(pin, material),
         FetchRoughnessMap(pin, material),
-        FetchNormalMap(pin, material),
-        0.0,
+        normal,
+        pin.CurrWorldPos - pin.PrevWorldPos,
         instanceData.MaterialIndex,
         pin.ViewDepth
     );

@@ -57,7 +57,10 @@ namespace PathFinder
 
         uint64_t HeapOffset = 0;
         bool CanBeAliased = true;
-        std::pair<uint64_t, uint64_t> AliasingLifetime;
+
+        std::pair<uint64_t, uint64_t> AliasingLifetime = { 
+            std::numeric_limits<uint64_t>::max(), std::numeric_limits<uint64_t>::min() 
+        };
 
     private:
         std::unordered_map<Foundation::Name, PassInfo> mPassInfoMap;
@@ -66,6 +69,7 @@ namespace PathFinder
         Foundation::Name mResourceName;
         std::vector<Foundation::Name> mAliases;
         uint64_t mSubresourceCount = 0;
+        std::string mCombinedResourceNames;
 
         std::vector<HAL::ResourceState> mSubresourceCombinedReadStates;
 
@@ -76,6 +80,7 @@ namespace PathFinder
         inline const auto& Aliases() const { return mAliases; }
         inline auto SubresourceCount() const { return mSubresourceCount; }
         inline auto TotalRequiredMemory() const { return mResourceFormat.ResourceSizeInBytes(); }
+        inline auto CombinedResourceNames() const { return mCombinedResourceNames; }
     };
 
 }

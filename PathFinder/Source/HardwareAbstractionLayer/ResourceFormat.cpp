@@ -13,7 +13,7 @@ namespace HAL
         const ClearValue& optimizedClearValue,
         ResourceState initialStateMask,
         ResourceState expectedStateMask,
-        uint16_t mipCount)
+        uint32_t mipCount)
         :
         Format{ format },
         Kind{ kind },
@@ -29,7 +29,7 @@ namespace HAL
         const Geometry::Dimensions& dimensions,
         ResourceState initialStateMask,
         ResourceState expectedStateMask,
-        uint16_t mipCount)
+        uint32_t mipCount)
         :
         TextureProperties(
             format, kind, dimensions,
@@ -42,7 +42,7 @@ namespace HAL
         const Geometry::Dimensions& dimensions,
         const ClearValue& optimizedClearValue,
         ResourceState initialStateMask,
-        uint16_t mipCount)
+        uint32_t mipCount)
         :
         TextureProperties(
             format, kind, dimensions, optimizedClearValue,
@@ -53,7 +53,7 @@ namespace HAL
         TextureKind kind,
         const Geometry::Dimensions& dimensions,
         ResourceState initialStateMask,
-        uint16_t mipCount)
+        uint32_t mipCount)
         :
         TextureProperties(
             format, kind, dimensions,
@@ -141,24 +141,24 @@ namespace HAL
 
     void ResourceFormat::DetermineExpectedUsageFlags(ResourceState expectedStates)
     {
-        if (EnumMaskBitSet(expectedStates, ResourceState::RenderTarget))
+        if (EnumMaskEquals(expectedStates, ResourceState::RenderTarget))
         {
             mDescription.Flags |= D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
         }
 
-        if (EnumMaskBitSet(expectedStates, ResourceState::DepthRead) ||
-            EnumMaskBitSet(expectedStates, ResourceState::DepthWrite))
+        if (EnumMaskEquals(expectedStates, ResourceState::DepthRead) ||
+            EnumMaskEquals(expectedStates, ResourceState::DepthWrite))
         {
             mDescription.Flags |= D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL;
 
-            if (!EnumMaskBitSet(expectedStates, ResourceState::PixelShaderAccess) &&
-                !EnumMaskBitSet(expectedStates, ResourceState::NonPixelShaderAccess))
+            if (!EnumMaskEquals(expectedStates, ResourceState::PixelShaderAccess) &&
+                !EnumMaskEquals(expectedStates, ResourceState::NonPixelShaderAccess))
             {
                 mDescription.Flags |= D3D12_RESOURCE_FLAG_DENY_SHADER_RESOURCE;
             }
         }
 
-        if (EnumMaskBitSet(expectedStates, ResourceState::UnorderedAccess))
+        if (EnumMaskEquals(expectedStates, ResourceState::UnorderedAccess))
         {
             mDescription.Flags |= D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
         }
@@ -179,9 +179,9 @@ namespace HAL
             },
             [this, expectedStates](const TextureProperties& textureProperties)
             {
-                if (EnumMaskBitSet(textureProperties.ExpectedStateMask, HAL::ResourceState::RenderTarget) ||
-                    EnumMaskBitSet(textureProperties.ExpectedStateMask, HAL::ResourceState::DepthWrite) ||
-                    EnumMaskBitSet(textureProperties.ExpectedStateMask, HAL::ResourceState::DepthRead))
+                if (EnumMaskEquals(textureProperties.ExpectedStateMask, HAL::ResourceState::RenderTarget) ||
+                    EnumMaskEquals(textureProperties.ExpectedStateMask, HAL::ResourceState::DepthWrite) ||
+                    EnumMaskEquals(textureProperties.ExpectedStateMask, HAL::ResourceState::DepthRead))
                 {
                     mAliasingGroup = HAL::HeapAliasingGroup::RTDSTextures;
                 }

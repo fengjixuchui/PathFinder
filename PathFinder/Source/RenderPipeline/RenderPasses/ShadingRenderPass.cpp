@@ -39,6 +39,7 @@ namespace PathFinder
         scheduler->ReadTexture(ResourceNames::GBufferMotionVector);
         scheduler->ReadTexture(ResourceNames::GBufferTypeAndMaterialIndex);
         scheduler->ReadTexture(ResourceNames::GBufferDepthStencil);
+        scheduler->ReadTexture(ResourceNames::RngSeedsCorrelated);
 
         scheduler->UseRayTracing();
     } 
@@ -65,21 +66,14 @@ namespace PathFinder
         cbContent.StochasticShadowedOutputTexIdx = resourceProvider->GetUATextureIndex(ResourceNames::StochasticShadowedShadingOutput);
         cbContent.StochasticUnshadowedOutputTexIdx = resourceProvider->GetUATextureIndex(ResourceNames::StochasticUnshadowedShadingOutput);
         cbContent.BlueNoiseTextureSize = { blueNoiseTexture->Properties().Dimensions.Width, blueNoiseTexture->Properties().Dimensions.Height };
+        cbContent.RngSeedsTexIdx = resourceProvider->GetSRTextureIndex(ResourceNames::RngSeedsCorrelated);
+        cbContent.FrameNumber = context->FrameNumber();
 
-        auto frameNumber = context->FrameNumber();
+        auto haltonSequence = Foundation::Halton::Sequence(0, 3);
 
-        // Correlate every Nth frame 
-        auto startIndex = frameNumber % 8 == 0 ? 0 : frameNumber * ShadingCBContent::MaxSupportedLights;
-        auto endIndex = startIndex + ShadingCBContent::MaxSupportedLights - 1;
-
-        auto haltonSequence = Foundation::Halton::Sequence<4>(startIndex, endIndex);
-
-        for (auto i = 0; i < haltonSequence.size(); ++i)
+        for (auto i = 0; i < 4; ++i)
         {
-            for (auto j = 0; j < haltonSequence[i].size(); ++j)
-            {
-                cbContent.HaltonSequence[i][j] = haltonSequence[i][j];
-            }
+            cbContent.Halton[i] = haltonSequence[i];
         }
 
         context->GetConstantsUpdater()->UpdateRootConstantBuffer(cbContent);

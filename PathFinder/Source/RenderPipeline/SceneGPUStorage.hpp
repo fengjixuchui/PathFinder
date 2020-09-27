@@ -31,6 +31,8 @@ namespace PathFinder
     {
         glm::mat4 InstanceWorldMatrix;
         // 16 byte boundary
+        glm::mat4 InstancePrevWorldMatrix;
+        // 16 byte boundary
         glm::mat4 InstanceNormalMatrix;
         // 16 byte boundary
         uint32_t MaterialIndex;
@@ -38,6 +40,7 @@ namespace PathFinder
         uint32_t UnifiedIndexBufferOffset;
         uint32_t IndexCount;
         // 16 byte boundary
+        uint32_t HasTangentSpace;
     };
 
     struct GPUMaterialTableEntry
@@ -111,7 +114,12 @@ namespace PathFinder
         float NearPlane = 0.0f;
         float FarPlane = 0.0f;
         float ExposureValue100 = 0.0f;
-        uint32_t __Pad0;
+        float FoVH = 0.0f;
+        // 16 byte boundary
+        float FoVV = 0.0f;
+        float FoVHTan = 0.0f;
+        float FoVVTan = 0.0f;
+        float AspectRatio = 0;
         // 16 byte boundary
     };
 

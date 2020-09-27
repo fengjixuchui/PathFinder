@@ -5,6 +5,7 @@
 #include "Mesh.hlsl"
 #include "GBuffer.hlsl"
 #include "ShadingPacking.hlsl"
+#include "Random.hlsl"
 
 struct ShadingResult
 {
@@ -21,8 +22,7 @@ struct ShadowRayPayload
 struct PassData
 {
     GBufferTextureIndices GBufferIndices;
-    // 1 4-component set of Halton numbers for rays of each light
-    float4 HaltonSequence[MaxSupportedLights * RaysPerLight];
+    float4 Halton;
     // 16 byte boundary
     uint BlueNoiseTexIdx;
     uint AnalyticOutputTexIdx;
@@ -30,14 +30,18 @@ struct PassData
     uint StochasticUnshadowedOutputTexIdx;
     // 16 byte boundary
     uint2 BlueNoiseTextureSize;
-    uint __Pad0;
-    uint __Pad1;
+    uint RngSeedsTexIdx;
+    uint FrameNumber;
 };
 
 struct RootConstants
 {
     uint CompressedLightPartitionInfo;
 };
+
+// Turing-level hardware can realistically work with 4 lights and 1 ray per light, per tile.
+// We should not bother with more to make space for other rendering workloads.
+static const uint TotalMaxRayCount = 4;
 
 #define PassDataType PassData
 
@@ -89,25 +93,32 @@ ShadingResult ZeroShadingResult()
     return result;
 }
 
-//--------------------------------------------------------------------------------------------------
+// Distributes rays between lights depending on their total amount
+uint RaysPerLight(LightTablePartitionInfo lightTableInfo)
+{
+    uint raysPerLight = TotalMaxRayCount / lightTableInfo.TotalLightsCount;
+    return raysPerLight;
+}
 
-float4 RandomNumbersForLight(uint lightIndex, uint rayIndex, float4 blueNoise)
+float4 RandomNumbersForLight(uint lightIndex, uint rayIndex, uint raysPerLight, float4 blueNoise)
 {
     // Halton sequence array must accommodate RaysPerLight number of sets
-    float4 halton = PassDataCB.HaltonSequence[lightIndex * RaysPerLight + rayIndex];
+    float4 additionalShift = PassDataCB.Halton;
 
     // Used for 2D position on light/BRDF
-    float u1 = frac(halton.r + blueNoise.r);
-    float u2 = frac(halton.g + blueNoise.g);
+    float u1 = frac(additionalShift.r + blueNoise.r);
+    float u2 = frac(additionalShift.g + blueNoise.g);
 
     // Choosing BRDF lobes
-    float u3 = frac(halton.b + blueNoise.b);
+    float u3 = frac(additionalShift.b + blueNoise.b);
 
     // Choosing between light and BRDF sampling
-    float u4 = frac(halton.a + blueNoise.a);
+    float u4 = frac(additionalShift.a + blueNoise.a);
 
     return float4(u1, u2, u3, u4);
 }
+
+//--------------------------------------------------------------------------------------------------
 
 LTCTerms FetchLTCTerms(GBufferStandard gBuffer, Material material, float3 viewDirWS)
 {
@@ -126,9 +137,9 @@ LTCTerms FetchLTCTerms(GBufferStandard gBuffer, Material material, float3 viewDi
     float2 uv = float2(gBuffer.Roughness, sqrt(1.0 - NdotV));
     uv = Refit0to1ValuesToTexelCenter(uv, LTC_LUT_Size);
 
-    float4 inverseMatrixComponentsSpecular = LTC_LUT_Specular_MatrixInverse.SampleLevel(LinearClampSampler, uv, 0);
-    float4 matrixComponentsSpecular = LTC_LUT_Specular_Matrix.SampleLevel(LinearClampSampler, uv, 0);
-    float4 maskingFresnelAndScaleSpecular = LTC_LUT_Specular_Terms.SampleLevel(LinearClampSampler, uv, 0);
+    float4 inverseMatrixComponentsSpecular = LTC_LUT_Specular_MatrixInverse.SampleLevel(LinearClampSampler(), uv, 0);
+    float4 matrixComponentsSpecular = LTC_LUT_Specular_Matrix.SampleLevel(LinearClampSampler(), uv, 0);
+    float4 maskingFresnelAndScaleSpecular = LTC_LUT_Specular_Terms.SampleLevel(LinearClampSampler(), uv, 0);
 
     float3x3 MInvSpecular = Matrix3x3ColumnMajor(
         float3(inverseMatrixComponentsSpecular.x, 0, inverseMatrixComponentsSpecular.y),
@@ -142,8 +153,8 @@ LTCTerms FetchLTCTerms(GBufferStandard gBuffer, Material material, float3 viewDi
         float3(matrixComponentsSpecular.z, 0, matrixComponentsSpecular.w)
     );
 
-    float4 inverseMatrixComponentsDiffuse = LTC_LUT_Diffuse_MatrixInverse.SampleLevel(LinearClampSampler, uv, 0);
-    float4 matrixComponentsDiffuse = LTC_LUT_Diffuse_Matrix.SampleLevel(LinearClampSampler, uv, 0);
+    float4 inverseMatrixComponentsDiffuse = LTC_LUT_Diffuse_MatrixInverse.SampleLevel(LinearClampSampler(), uv, 0);
+    float4 matrixComponentsDiffuse = LTC_LUT_Diffuse_Matrix.SampleLevel(LinearClampSampler(), uv, 0);
 
     float3x3 MInvDiffuse = Matrix3x3ColumnMajor(
         float3(inverseMatrixComponentsDiffuse.x, 0, inverseMatrixComponentsDiffuse.y),
@@ -187,7 +198,7 @@ LTCTerms FetchLTCTerms(GBufferStandard gBuffer, Material material, float3 viewDi
     terms.LUT_Specular_Terms = LTC_LUT_Specular_Terms;
     terms.LUT_Diffuse_Terms = LTC_LUT_Diffuse_Terms;
     terms.LUTSize = material.LTC_LUT_TextureSize;
-    terms.LUTSampler = LinearClampSampler;
+    terms.LUTSampler = LinearClampSampler();
 
     return terms;
 }
@@ -206,11 +217,18 @@ float3 SampleBRDF(Light light, LTCTerms ltcTerms, LTCAnalyticEvaluationResult di
 
     // This test should almost never fail because we just importance sampled from the BRDF.
     // Only an all black BRDF or a precision issue could trigger this.
-    return directLightingEvaluationResult.BRDFProbability > 0.0f ?
+    float3 brdf = directLightingEvaluationResult.BRDFProbability > 0.0f ?
         // Stochastic estimate of incident light, without shadow
         // Note: projection cosine dot(w_i, n) is baked into the LTC-based BRDF
-        brdfRayLightingEvaluationResult.BRDFMagnitude / misPDF :
+        brdfRayLightingEvaluationResult.BRDFMagnitude / misPDF:
         0.xxx; 
+
+    // This is a sad hack due to ray-traced lighting samples having lower magnitude than analytic ones.
+    // In low lighting environment dim unshadowed/shadowed images produce artifacts where values approach 0.
+    // We increase luminance by a constant factor to move problematic areas out of the visible range.
+    //brdf *= 10.0; // Looks like the hack is not even universal and depends on the situation. Oh well, need to figure out something smarter.
+
+    return brdf;
 }
 
 void ShadeWithSphericalLights(
@@ -223,6 +241,8 @@ void ShadeWithSphericalLights(
     inout RTData rtData,
     inout ShadingResult shadingResult)
 {
+    uint raysPerLight = RaysPerLight(lightPartitionInfo);
+
     for (uint lightIdx = 0; lightIdx < lightPartitionInfo.SphericalLightsCount; ++lightIdx)
     {
         uint lightTableOffset = lightIdx + lightPartitionInfo.SphericalLightsOffset;
@@ -234,9 +254,9 @@ void ShadeWithSphericalLights(
         LTCAnalyticEvaluationResult directLightingEvaluationResult = EvaluateDirectSphericalLighting(light, lightPoints, gBuffer, ltcTerms, viewDirection, surfacePosition);
 
         [unroll]
-        for (uint rayIdx = 0; rayIdx < RaysPerLight; ++rayIdx)
+        for (uint rayIdx = 0; rayIdx < raysPerLight; ++rayIdx)
         {
-            float4 randomNumbers = RandomNumbersForLight(lightTableOffset, rayIdx, blueNoise);
+            float4 randomNumbers = RandomNumbersForLight(lightTableOffset, rayIdx, raysPerLight, blueNoise);
 
             // Randomly pick specular or diffuse lobe based on diffuse probability
             bool isSpecular = randomNumbers.z > directLightingEvaluationResult.DiffuseProbability;
@@ -252,9 +272,9 @@ void ShadeWithSphericalLights(
 
             LightSample lightSample = SampleSphericalLight(light, samplingInputs, sampleVector);
 
-            float3 brdf = SampleBRDF(light, ltcTerms, directLightingEvaluationResult, lightSample, surfacePosition) * RaysPerLightInverse;
+            float3 brdf = SampleBRDF(light, ltcTerms, directLightingEvaluationResult, lightSample, surfacePosition) / raysPerLight;
 
-            uint rayLightPairIndex = lightTableOffset * RaysPerLight + rayIdx;
+            uint rayLightPairIndex = lightTableOffset * raysPerLight + rayIdx;
             SetStochasticBRDFMagnitude(rtData, brdf, rayLightPairIndex);
             SetRaySphericalLightIntersectionPoint(rtData, light, lightSample.IntersectionPoint, rayLightPairIndex);
         }
@@ -273,6 +293,8 @@ void ShadeWithRectangularLights(
     inout RTData rtData,
     inout ShadingResult shadingResult)
 {
+    uint raysPerLight = RaysPerLight(lightPartitionInfo);
+
     for (uint lightIdx = 0; lightIdx < lightPartitionInfo.RectangularLightsCount; ++lightIdx)
     {
         uint lightTableOffset = lightIdx + lightPartitionInfo.RectangularLightsOffset;
@@ -284,9 +306,9 @@ void ShadeWithRectangularLights(
         LTCAnalyticEvaluationResult directLightingEvaluationResult = EvaluateDirectRectangularLighting(light, lightPoints, gBuffer, ltcTerms, viewDirection, surfacePosition);
 
         [unroll]
-        for (uint rayIdx = 0; rayIdx < RaysPerLight; ++rayIdx)
+        for (uint rayIdx = 0; rayIdx < raysPerLight; ++rayIdx)
         {
-            float4 randomNumbers = RandomNumbersForLight(lightTableOffset, rayIdx, blueNoise);
+            float4 randomNumbers = RandomNumbersForLight(lightTableOffset, rayIdx, raysPerLight, blueNoise);
             bool isSpecular = randomNumbers.z > directLightingEvaluationResult.DiffuseProbability;
             float3x3 M = isSpecular ? ltcTerms.MSpecular : ltcTerms.MDiffuse;
             bool sampleBRDF = randomNumbers.w <= directLightingEvaluationResult.BRDFProbability;
@@ -296,9 +318,9 @@ void ShadeWithRectangularLights(
                 RectangularLightSampleVector(samplingInputs, randomNumbers.x, randomNumbers.y);
 
             LightSample lightSample = SampleRectangularLight(light, samplingInputs, lightPoints, sampleVector);
-            float3 brdf = SampleBRDF(light, ltcTerms, directLightingEvaluationResult, lightSample, surfacePosition) * RaysPerLightInverse;
+            float3 brdf = SampleBRDF(light, ltcTerms, directLightingEvaluationResult, lightSample, surfacePosition) / raysPerLight;
 
-            uint rayLightPairIndex = lightTableOffset * RaysPerLight + rayIdx;
+            uint rayLightPairIndex = lightTableOffset * raysPerLight + rayIdx;
             SetStochasticBRDFMagnitude(rtData, brdf, rayLightPairIndex);
             SetRayRectangularLightIntersectionPoint(rtData, light, lightPoints.LightRotation, lightSample.IntersectionPoint, rayLightPairIndex);
         }
@@ -317,6 +339,8 @@ void ShadeWithEllipticalLights(
     inout RTData rtData,
     inout ShadingResult shadingResult)
 {
+    uint raysPerLight = RaysPerLight(lightPartitionInfo);
+
     for (uint lightIdx = 0; lightIdx < lightPartitionInfo.EllipticalLightsCount; ++lightIdx)
     {
         uint lightTableOffset = lightIdx + lightPartitionInfo.EllipticalLightsOffset;
@@ -332,9 +356,9 @@ void ShadeWithEllipticalLights(
         LTCAnalyticEvaluationResult directLightingEvaluationResult = EvaluateDirectRectangularLighting(light, lightPoints, gBuffer, ltcTerms, viewDirection, surfacePosition);
 
         [unroll]
-        for (uint rayIdx = 0; rayIdx < RaysPerLight; ++rayIdx)
+        for (uint rayIdx = 0; rayIdx < raysPerLight; ++rayIdx)
         {
-            float4 randomNumbers = RandomNumbersForLight(lightTableOffset, rayIdx, blueNoise);
+            float4 randomNumbers = RandomNumbersForLight(lightTableOffset, rayIdx, raysPerLight, blueNoise);
             bool isSpecular = randomNumbers.z > directLightingEvaluationResult.DiffuseProbability;
             float3x3 M = isSpecular ? ltcTerms.MSpecular : ltcTerms.MDiffuse;
             bool sampleBRDF = randomNumbers.w <= directLightingEvaluationResult.BRDFProbability;
@@ -344,9 +368,9 @@ void ShadeWithEllipticalLights(
                 RectangularLightSampleVector(samplingInputs, randomNumbers.x, randomNumbers.y);
 
             LightSample lightSample = SampleEllipticalLight(light, samplingInputs, lightPoints, sampleVector);
-            float3 brdf = SampleBRDF(light, ltcTerms, directLightingEvaluationResult, lightSample, surfacePosition) * RaysPerLightInverse;
+            float3 brdf = SampleBRDF(light, ltcTerms, directLightingEvaluationResult, lightSample, surfacePosition) / raysPerLight;
 
-            uint rayLightPairIndex = lightTableOffset * RaysPerLight + rayIdx;
+            uint rayLightPairIndex = lightTableOffset * raysPerLight + rayIdx;
             SetStochasticBRDFMagnitude(rtData, brdf, rayLightPairIndex);
             SetRayRectangularLightIntersectionPoint(rtData, light, lightPoints.LightRotation, lightSample.IntersectionPoint, rayLightPairIndex);
         }
@@ -355,25 +379,27 @@ void ShadeWithEllipticalLights(
     }
 }
 
-float4 TraceShadows(RTData rtData, float3 surfacePosition, float4 blueNoise)
+float4 TraceShadows(RTData rtData, LightTablePartitionInfo lightPartitionInfo, float3 surfacePosition, float4 blueNoise)
 {
     // Shadow values for hard coded maximum of 4 lights
     float4 shadowValues = 0.xxxx;
-    
+    uint raysPerLight = RaysPerLight(lightPartitionInfo);
+
     [unroll]
-    for (uint i = 0; i < MaxSupportedLights * RaysPerLight; ++i)
+    for (uint i = 0; i < TotalMaxRayCount; ++i)
     {
         if (rtData.BRDFResponses[i] == 0)
         {
             continue;
         }
 
-        uint lightIndex = i * RaysPerLightInverse;
+        uint lightIndex = i / raysPerLight;
         Light light = LightTable[lightIndex];
         float3 lightIntersectionPoint = 0.xxx;
         float3x3 lightRotation = RotationMatrix3x3(light.Orientation.xyz);
 
-        [branch] switch (light.LightType)
+        [branch]
+        switch (light.LightType)
         {
         case LightTypeSphere:
             lightIntersectionPoint = GetRaySphericalLightIntersectionPoint(rtData, light, i);
@@ -388,8 +414,8 @@ float4 TraceShadows(RTData rtData, float3 surfacePosition, float4 blueNoise)
 
         float3 lightToSurface = surfacePosition - lightIntersectionPoint;
         float vectorLength = length(lightToSurface);
-        float tmax = vectorLength - 1e-03;
-        float tmin = 1e-03;
+        float tmax = vectorLength - 1e-02;
+        float tmin = 1e-02;
 
         RayDesc dxrRay;
         dxrRay.Origin = lightIntersectionPoint;
@@ -416,17 +442,19 @@ float4 TraceShadows(RTData rtData, float3 surfacePosition, float4 blueNoise)
     return shadowValues;
 }
 
-void CombineStochasticLightingAndShadows(RTData rtData, inout ShadingResult shadingResult)
+void CombineStochasticLightingAndShadows(RTData rtData, LightTablePartitionInfo lightPartitionInfo, inout ShadingResult shadingResult)
 {
+    uint raysPerLight = RaysPerLight(lightPartitionInfo);
+
     [unroll]
-    for (uint i = 0; i < MaxSupportedLights * RaysPerLight; ++i)
+    for (uint i = 0; i < TotalMaxRayCount; ++i)
     {
         if (rtData.BRDFResponses[i] == 0)
         {
             continue;
         }
 
-        uint lightIndex = i * RaysPerLightInverse;
+        uint lightIndex = i / raysPerLight;
         Light light = LightTable[lightIndex];
         float3 brdf = GetStochasticBRDFMagnitude(rtData, i);
         float3 unshadowed = brdf * light.Color.rgb * light.Luminance;
@@ -438,7 +466,8 @@ void CombineStochasticLightingAndShadows(RTData rtData, inout ShadingResult shad
 
 ShadingResult EvaluateStandardGBufferLighting(GBufferTexturePack gBufferTextures, float2 uv, uint2 pixelIndex, float depth)
 {
-    Texture2D blueNoiseTexture = Textures2D[PassDataCB.BlueNoiseTexIdx];
+    Texture3D blueNoiseTexture = Textures3D[PassDataCB.BlueNoiseTexIdx];
+    Texture2D<uint4> rngSeeds = UInt4_Textures2D[PassDataCB.RngSeedsTexIdx];
 
     GBufferStandard gBuffer;
     LoadStandardGBuffer(gBuffer, gBufferTextures, pixelIndex);
@@ -446,8 +475,8 @@ ShadingResult EvaluateStandardGBufferLighting(GBufferTexturePack gBufferTextures
     Material material = MaterialTable[gBuffer.MaterialIndex];
     LightTablePartitionInfo partitionInfo = DecompressLightPartitionInfo();
 
-    float4 blueNoise = blueNoiseTexture.Load(uint3(pixelIndex % PassDataCB.BlueNoiseTextureSize, 0));
-    float3 surfacePosition = ReconstructWorldSpacePosition(depth, uv, FrameDataCB.CurrentFrameCamera);
+    float4 blueNoise = blueNoiseTexture[rngSeeds[pixelIndex].xyz];
+    float3 surfacePosition = NDCDepthToWorldPosition(depth, uv, FrameDataCB.CurrentFrameCamera);
     float3 viewDirection = normalize(FrameDataCB.CurrentFrameCamera.Position.xyz - surfacePosition);
 
     LTCTerms ltcTerms = FetchLTCTerms(gBuffer, material, viewDirection);
@@ -458,9 +487,9 @@ ShadingResult EvaluateStandardGBufferLighting(GBufferTexturePack gBufferTextures
     ShadeWithRectangularLights(gBuffer, ltcTerms, partitionInfo, blueNoise, viewDirection, surfacePosition, rtData, shadingResult);
     ShadeWithEllipticalLights(gBuffer, ltcTerms, partitionInfo, blueNoise, viewDirection, surfacePosition, rtData, shadingResult);
 
-    rtData.ShadowFactors = TraceShadows(rtData, surfacePosition, blueNoise);
+    rtData.ShadowFactors = TraceShadows(rtData, partitionInfo, surfacePosition, blueNoise);
 
-    CombineStochasticLightingAndShadows(rtData, shadingResult);
+    CombineStochasticLightingAndShadows(rtData, partitionInfo, shadingResult);
 
     return shadingResult;
 }

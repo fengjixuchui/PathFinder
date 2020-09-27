@@ -95,11 +95,13 @@ namespace PathFinder
         {
             GPUMeshInstanceTableEntry instanceEntry{
                 instance.Transformation().ModelMatrix(),
+                instance.PrevTransformation().ModelMatrix(),
                 instance.Transformation().NormalMatrix(),
                 instance.AssosiatedMaterial()->GPUMaterialTableIndex,
                 instance.AssosiatedMesh()->LocationInVertexStorage().VertexBufferOffset,
                 instance.AssosiatedMesh()->LocationInVertexStorage().IndexBufferOffset,
-                instance.AssosiatedMesh()->LocationInVertexStorage().IndexCount
+                instance.AssosiatedMesh()->LocationInVertexStorage().IndexCount,
+                instance.AssosiatedMesh()->HasTangentSpace()
             };
 
             BottomRTAS& blas = mBottomAccelerationStructures[instance.AssosiatedMesh()->LocationInVertexStorage().BottomAccelerationStructureIndex];
@@ -109,6 +111,8 @@ namespace PathFinder
             mMeshInstanceTable->Write(&instanceEntry, index, 1);
 
             ++index;
+
+            instance.UpdatePreviousTransform();
         }
 
         mTopAccelerationStructure.Build();
@@ -135,17 +139,20 @@ namespace PathFinder
 
         uint32_t index = 0;
         mLightTablePartitionInfo = {};
-        mLightTablePartitionInfo.TotalLightsCount = requiredBufferSize;
+        mLightTablePartitionInfo.TotalLightsCount = 0;
         mLightTablePartitionInfo.SphericalLightsOffset = index;
 
         for (SphericalLight& light : sphericalLights)
         {
+            if (light.LuminousPower() <= 0.0) continue;
+
             GPULightTableEntry lightEntry = CreateLightGPUTableEntry(light);
             mLightTable->Write(&lightEntry, index, 1);
             light.SetGPULightTableIndex(index);
 
             ++index;
             ++mLightTablePartitionInfo.SphericalLightsCount;
+            ++mLightTablePartitionInfo.TotalLightsCount;
 
             mLightsMaximumLuminance += std::max(light.Color().R() * light.Luminance(), 
                 std::max(light.Color().G() * light.Luminance(), light.Color().B() * light.Luminance()));
@@ -155,12 +162,15 @@ namespace PathFinder
 
         for (FlatLight& light : rectangularLights)
         {
+            if (light.LuminousPower() <= 0.0) continue;
+
             GPULightTableEntry lightEntry = CreateLightGPUTableEntry(light);
             mLightTable->Write(&lightEntry, index, 1);
             light.SetGPULightTableIndex(index);
 
             ++index;
             ++mLightTablePartitionInfo.RectangularLightsCount;
+            ++mLightTablePartitionInfo.TotalLightsCount;
 
             mLightsMaximumLuminance += std::max(light.Color().R() * light.Luminance(),
                 std::max(light.Color().G() * light.Luminance(), light.Color().B() * light.Luminance()));
@@ -170,12 +180,15 @@ namespace PathFinder
 
         for (FlatLight& light : diskLights)
         {
+            if (light.LuminousPower() <= 0.0) continue;
+
             GPULightTableEntry lightEntry = CreateLightGPUTableEntry(light);
             mLightTable->Write(&lightEntry, index, 1);
             light.SetGPULightTableIndex(index);
 
             ++index;
             ++mLightTablePartitionInfo.EllipticalLightsCount;
+            ++mLightTablePartitionInfo.TotalLightsCount;
 
             mLightsMaximumLuminance += std::max(light.Color().R() * light.Luminance(),
                 std::max(light.Color().G() * light.Luminance(), light.Color().B() * light.Luminance()));
@@ -198,6 +211,11 @@ namespace PathFinder
         gpuCamera.ExposureValue100 = camera.ExposureValue100();
         gpuCamera.FarPlane = camera.FarClipPlane();
         gpuCamera.NearPlane = camera.NearClipPlane();
+        gpuCamera.FoVH = glm::radians(camera.FOVH());
+        gpuCamera.FoVV = glm::radians(camera.FOVV());
+        gpuCamera.FoVHTan = tan(gpuCamera.FoVH);
+        gpuCamera.FoVVTan = tan(gpuCamera.FoVV);
+        gpuCamera.AspectRatio = camera.AspectRatio();
 
         return gpuCamera;
     }

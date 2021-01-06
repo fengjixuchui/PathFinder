@@ -14,12 +14,13 @@
 #include "DescriptorHeap.hpp"
 #include "Fence.hpp"
 #include "Buffer.hpp"
+#include "QueryHeap.hpp"
 #include "RayTracingAccelerationStructure.hpp"
 #include "ResourceFootprint.hpp"
 #include "ShaderRegister.hpp"
 #include "Types.hpp"
 
-#include "../Geometry/Rect2D.hpp"
+#include <Geometry/Rect2D.hpp>
 
 #include <glm/vec3.hpp>
 #include <glm/vec4.hpp>
@@ -42,6 +43,9 @@ namespace HAL
 
         void Reset();
         void Close();
+
+        void ExtractQueryData(const QueryHeap& heap, uint64_t startIndex, uint64_t queryCount, const Buffer& readbackBuffer);
+        void EndQuery(const QueryHeap& heap, uint64_t queryIndex);
 
         void SetDebugName(const std::string& name) override;
 
@@ -112,6 +116,7 @@ namespace HAL
         using ComputeCommandListBase::SetPipelineState;
 
         void SetViewport(const Viewport& viewport);
+        void SetScissor(const Geometry::Rect2D& scissorRect);
         void SetRenderTarget(const RTDescriptor& rtDescriptor, const DSDescriptor* depthStencilDescriptor = nullptr);
         void ClearRenderTarget(const RTDescriptor& rtDescriptor, const glm::vec4& color);
         void CleadDepthStencil(const DSDescriptor& dsDescriptor, float depthValue);

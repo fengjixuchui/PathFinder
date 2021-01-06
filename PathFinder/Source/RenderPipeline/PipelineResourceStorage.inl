@@ -10,8 +10,8 @@ namespace PathFinder
 
         if (!mPerFrameRootConstantsBuffer || mPerFrameRootConstantsBuffer->Capacity<Constants>(Alignment) < 1)
         {
-            HAL::BufferProperties<Constants> properties{ 1, Alignment, HAL::ResourceState::ConstantBuffer };
-            mPerFrameRootConstantsBuffer = mResourceProducer->NewBuffer(properties, Memory::GPUResource::UploadStrategy::DirectAccess);
+            auto properties = HAL::BufferProperties::Create<Constants>(1, Alignment, HAL::ResourceState::ConstantBuffer);
+            mPerFrameRootConstantsBuffer = mResourceProducer->NewBuffer(properties, Memory::GPUResource::AccessStrategy::DirectUpload);
             mPerFrameRootConstantsBuffer->SetDebugName("Frame Constant Buffer");
         }
 
@@ -26,7 +26,7 @@ namespace PathFinder
 
         if (!mGlobalRootConstantsBuffer || mGlobalRootConstantsBuffer->Capacity<Constants>(Alignment) < 1)
         {
-            HAL::BufferProperties<Constants> properties{ 1, Alignment, HAL::ResourceState::ConstantBuffer };
+            auto properties = HAL::BufferProperties::Create<Constants>(1, Alignment, HAL::ResourceState::ConstantBuffer);
             mGlobalRootConstantsBuffer = mResourceProducer->NewBuffer(properties);
             mGlobalRootConstantsBuffer->SetDebugName("Global Constant Buffer");
         }
@@ -60,8 +60,9 @@ namespace PathFinder
         if (!passData->PassConstantBuffer || passData->PassConstantBuffer->Capacity() < newBufferSize)
         {
             uint64_t grownBufferSize = Foundation::MemoryUtils::Align(newBufferSize, GrowAlignment);
-            HAL::BufferProperties properties{ grownBufferSize, 1, HAL::ResourceState::ConstantBuffer };
-            passData->PassConstantBuffer = mResourceProducer->NewBuffer(properties, Memory::GPUResource::UploadStrategy::DirectAccess);
+            auto properties = HAL::BufferProperties::Create<uint8_t>(grownBufferSize, 1, HAL::ResourceState::ConstantBuffer);
+
+            passData->PassConstantBuffer = mResourceProducer->NewBuffer(properties, Memory::GPUResource::AccessStrategy::DirectUpload);
             passData->PassConstantBuffer->SetDebugName(passNode.PassMetadata().Name.ToString() + " Constant Buffer");
             passData->PassConstantData.resize(grownBufferSize);
         }
@@ -71,51 +72,6 @@ namespace PathFinder
         // Store data in CPU storage 
         const uint8_t* data = reinterpret_cast<const uint8_t*>(&constants);
         std::copy(data, data + sizeof(Constants), passData->PassConstantData.begin() + passData->PassConstantBufferMemoryOffset);
-    }
-
-    template <class BufferDataT>
-    void PipelineResourceStorage::QueueBufferAllocationIfNeeded(
-        ResourceName resourceName, 
-        const HAL::BufferProperties<BufferDataT>& properties, 
-        std::optional<Foundation::Name> propertyCopySourceName,
-        const SchedulingInfoConfigurator& siConfigurator)
-    {
-        /*    HAL::ResourceFormat bufferFormat = HAL::Buffer::ConstructResourceFormat(mDevice, properties);
-
-            PipelineResourceStorageResource* resourceObjects = GetPerResourceData(resourceName);
-            assert_format(!resourceObjects, "Buffer ", resourceName.ToString(), " allocation is already requested");
-            resourceObjects = &CreatePerResourceData(resourceName, bufferFormat);
-
-            auto allocationAction = [=]()
-            {
-                HAL::Heap* heap = nullptr;
-
-                switch (resourceObjects->SchedulingInfo.ResourceFormat().ResourceAliasingGroup())
-                {
-                case HAL::HeapAliasingGroup::Buffers: heap = mBufferHeap.get(); break;
-                case HAL::HeapAliasingGroup::Universal: heap = mUniversalHeap.get(); break;
-                case HAL::HeapAliasingGroup::RTDSTextures:
-                case HAL::HeapAliasingGroup::NonRTDSTextures:
-                    assert_format(false, "Should never be hit");
-                }
-
-                HAL::BufferProperties<BufferDataT> finalProperties = properties;
-                finalProperties.ExpectedStateMask = resourceObjects->SchedulingInfo.ExpectedStates();
-
-                if (resourceObjects->SchedulingInfo.CanBeAliased)
-                {
-                    resourceObjects->Buffer = mResourceProducer->NewBuffer(finalProperties, *heap, resourceObjects->SchedulingInfo.HeapOffset);
-                }
-                else
-                {
-                    resourceObjects->Buffer = mResourceProducer->NewBuffer(finalProperties);
-                }
-
-                resourceObjects->Buffer->SetDebugName(resourceName.ToString());
-            };
-
-            mAllocationActions.push_back(allocationAction);
-            mSchedulingCreationRequests.emplace_back(siConfigurator, resourceName, std::nullopt);*/
     }
 
 }

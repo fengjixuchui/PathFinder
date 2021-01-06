@@ -1,10 +1,16 @@
 #include "Scene.hpp"
 
+#include <bitsery/bitsery.h>
+#include <bitsery/adapter/buffer.h>
+#include <bitsery/traits/vector.h>
+
+#include <fstream>
+
 namespace PathFinder 
 {
 
-    Scene::Scene(const std::filesystem::path& executableFolder, Memory::GPUResourceProducer* resourceProducer)
-        : mResourceLoader{ executableFolder, resourceProducer } 
+    Scene::Scene(const std::filesystem::path& executableFolder, const HAL::Device* device, Memory::GPUResourceProducer* resourceProducer)
+        : mResourceLoader{ executableFolder, resourceProducer }, mMeshLoader{ executableFolder }, mLuminanceMeter{ &mCamera }, mGPUStorage{ this, device, resourceProducer }
     {
         LoadUtilityResources();
     }
@@ -45,13 +51,73 @@ namespace PathFinder
         return std::prev(mSphericalLights.end());
     }
 
+    std::optional<Scene::EntityVariant> Scene::GetEntityByID(const EntityID& id) const
+    {
+        auto it = mMappedEntities.find(id);
+        return it == mMappedEntities.end() ? std::nullopt : std::optional(it->second);
+    }
+
+    void Scene::RemapEntityIDs()
+    {
+        mMappedEntities.clear();
+
+        auto remap = [this](auto&& entities)
+        {
+            for (auto& entity : entities)
+            {
+                mMappedEntities[entity.ID()] = &entity;
+            }
+        };
+
+        remap(mMeshInstances);
+        remap(mSphericalLights);
+        remap(mDiskLights);
+        remap(mRectangularLights);
+    }
+
+    void Scene::Serialize(const std::filesystem::path& destination) const
+    {
+        using Buffer = std::vector<uint8_t>;
+        using Writer = bitsery::OutputBufferAdapter<Buffer>;
+        using Reader = bitsery::InputBufferAdapter<Buffer>;
+
+        Buffer buffer{};
+        size_t writtenSize{};
+
+        bitsery::ext::PointerLinkingContext ctx{};
+        writtenSize = bitsery::quickSerialization(ctx, Writer{ buffer }, mCamera);
+
+        //make sure that pointer linking context is valid
+        //this ensures that all non-owning pointers points to data that has been serialized,
+        //so we can successfully reconstruct pointers after deserialization
+        assert(ctx.isValid());
+
+        std::filesystem::path directory = destination;
+        directory.remove_filename();
+
+        std::filesystem::create_directories(directory);
+
+        std::ofstream sceneFile{ destination, std::ios::out | std::ios::binary };
+
+        if (sceneFile)
+        {
+            sceneFile.write((const char*)buffer.data(), writtenSize);
+            sceneFile.close();
+        }
+    }
+
+    void Scene::Deserialize(const std::filesystem::path& source)
+    {
+
+    }
+
     void Scene::LoadUtilityResources()
     {
         mBlueNoiseTexture = mResourceLoader.LoadTexture("/Precompiled/BlueNoise3DIndependent.dds");
         mSMAAAreaTexture = mResourceLoader.LoadTexture("/Precompiled/SMAAAreaTex.dds");
         mSMAASearchTexture = mResourceLoader.LoadTexture("/Precompiled/SMAASearchTex.dds");
-        //mBlueNoiseTexture = mResourceLoader.LoadTexture("/Precompiled/BlueNoise3D16.dds");
-        //mBlueNoiseTexture = mResourceLoader.LoadTexture("/Precompiled/Blue_Noise_RGBA_0.dds");
+        mUnitCube = mMeshLoader.Load("Precompiled/UnitCube.obj").back();
+        mUnitSphere = mMeshLoader.Load("Precompiled/UnitSphere.obj").back();
     }
 
 }

@@ -1,4 +1,5 @@
 #include "BloomCompositionRenderPass.hpp"
+#include "UAVClearHelper.hpp"
 
 namespace PathFinder
 {
@@ -40,7 +41,7 @@ namespace PathFinder
         inputs.LargeBloomWeight = parameters.LargeBloomWeight;
 
         context->GetConstantsUpdater()->UpdateRootConstantBuffer(inputs);
-        context->GetCommandRecorder()->Dispatch(dimensions, { 32, 32 });
+        context->GetCommandRecorder()->Dispatch(dimensions, { 16, 16 });
     }
 
 }

@@ -1,57 +1,196 @@
 #include "SceneManipulatorViewController.hpp"
+#include "UIManager.hpp"
 
-#include <imguizmo/ImGuizmo.h>
+#include <RenderPipeline/RenderPasses/PipelineNames.hpp>
+
 #include <imgui/imgui.h>
 #include <glm/mat4x4.hpp>
 #include <glm/gtc/type_ptr.hpp>
 
-namespace UI
+namespace PathFinder
 {
 
-    void SceneManipulatorViewController::SetCamera(PathFinder::Camera* camera)
+    void SceneManipulatorViewController::OnCreated()
     {
-        mCamera = camera;
+        CameraVM = GetViewModel<CameraViewModel>();
+        EntityVM = GetViewModel<PickedEntityViewModel>();
+    }
+
+    void SceneManipulatorViewController::DrawCameraControls()
+    {
+        ImGuiIO& io = ImGui::GetIO();
+
+        ImGui::Text("Camera");
+        ImGui::SliderFloat("FoV", &CameraVM->FOVH, 60.f, 120.f);
+        ImGui::SliderFloat("Aperture", &CameraVM->LenseAperture, 1.f, 16.f);
+        ImGui::SliderFloat("Film Speed (ISO)", &CameraVM->FilmSpeed, 100.f, 2000.f);
+        ImGui::SliderFloat("Shutter Speed", &CameraVM->ShutterTime, 30.f, 240.f);
+    }
+
+    void SceneManipulatorViewController::DrawImGuizmoControls()
+    {
+        ImGuiIO& io = ImGui::GetIO();
+
+        glm::mat4 modelMatrix = EntityVM->ModelMatrix();
+        glm::mat4 deltaMatrix{ 1.0f };
+
+        if (EntityVM->ShouldDisplay())
+        {
+            ImGuizmo::BeginFrame();
+            ImGuizmo::SetRect(0, 0, io.DisplaySize.x, io.DisplaySize.y);
+            ImGui::Separator();
+
+            ImGuizmo::SetID(0);
+            EditTransform(
+                glm::value_ptr(CameraVM->View),
+                glm::value_ptr(CameraVM->Projection),
+                glm::value_ptr(modelMatrix),
+                glm::value_ptr(deltaMatrix),
+                EntityVM->ShouldDisplay(),
+                EntityVM->AreRotationsAllowed());
+
+            mIsInteracting = ImGuizmo::IsUsing();
+
+            if (mIsInteracting)
+            {
+                EntityVM->SetModifiedModelMatrix(modelMatrix, deltaMatrix);
+            }
+
+            ImGui::Checkbox("Draw Cube", &mDrawCube);
+            if (mDrawCube)
+            {
+                ImGuizmo::DrawCubes(glm::value_ptr(CameraVM->View), glm::value_ptr(CameraVM->Projection), glm::value_ptr(modelMatrix), 1);
+            }
+        }
+    }
+
+    bool SceneManipulatorViewController::EditTransform(
+        const float* cameraView, 
+        float* cameraProjection, 
+        float* matrix, 
+        float* deltaMatrix, 
+        bool editTransformDecomposition,
+        bool allowRotations)
+    {
+        if (editTransformDecomposition)
+        {
+            if (ImGui::RadioButton("Translate", mCurrentGizmoOperation == ImGuizmo::TRANSLATE))
+                mCurrentGizmoOperation = ImGuizmo::TRANSLATE;
+            ImGui::SameLine();
+
+            if (allowRotations)
+            {
+                if (ImGui::RadioButton("Rotate", mCurrentGizmoOperation == ImGuizmo::ROTATE))
+                    mCurrentGizmoOperation = ImGuizmo::ROTATE;
+            }
+            
+            ImGui::SameLine();
+            if (ImGui::RadioButton("Scale", mCurrentGizmoOperation == ImGuizmo::SCALE))
+                mCurrentGizmoOperation = ImGuizmo::SCALE;
+            float matrixTranslation[3], matrixRotation[3], matrixScale[3];
+            ImGuizmo::DecomposeMatrixToComponents(matrix, matrixTranslation, matrixRotation, matrixScale);
+            ImGui::InputFloat3("Tr", matrixTranslation, 3);
+
+            if (allowRotations)
+            {
+                ImGui::InputFloat3("Rt", matrixRotation, 3);
+            }
+            
+            ImGui::InputFloat3("Sc", matrixScale, 3);
+            ImGuizmo::RecomposeMatrixFromComponents(matrixTranslation, matrixRotation, matrixScale, matrix);
+
+            if (mCurrentGizmoOperation != ImGuizmo::SCALE)
+            {
+                if (ImGui::RadioButton("Local", mCurrentGizmoMode == ImGuizmo::LOCAL))
+                    mCurrentGizmoMode = ImGuizmo::LOCAL;
+                ImGui::SameLine();
+                if (ImGui::RadioButton("World", mCurrentGizmoMode == ImGuizmo::WORLD))
+                    mCurrentGizmoMode = ImGuizmo::WORLD;
+            }
+
+            ImGui::Checkbox("", &mUseSnap);
+            ImGui::SameLine();
+
+            switch (mCurrentGizmoOperation)
+            {
+            case ImGuizmo::TRANSLATE:
+                ImGui::InputFloat3("Snap", &mSnap[0]);
+                break;
+            case ImGuizmo::ROTATE:
+                ImGui::InputFloat("Angle Snap", &mSnap[0]);
+                break;
+            case ImGuizmo::SCALE:
+                ImGui::InputFloat("Scale Snap", &mSnap[0]);
+                break;
+            }
+            ImGui::Checkbox("Bound Sizing", &mBoundSizing);
+            if (mBoundSizing)
+            {
+                ImGui::PushID(3);
+                ImGui::Checkbox("", &mBoundSizingSnap);
+                ImGui::SameLine();
+                ImGui::InputFloat3("Snap", mBoundsSnap);
+                ImGui::PopID();
+            }
+        }
+        ImGuiIO& io = ImGui::GetIO();
+
+        return ImGuizmo::Manipulate(
+            cameraView, 
+            cameraProjection, 
+            mCurrentGizmoOperation, 
+            mCurrentGizmoMode, 
+            matrix,
+            deltaMatrix, 
+            mUseSnap ? &mSnap[0] : nullptr, 
+            mBoundSizing ? mBounds : nullptr, 
+            mBoundSizingSnap ? mBoundsSnap : nullptr);
     }
 
     void SceneManipulatorViewController::Draw()
     {
-        ImGuiIO& io = ImGui::GetIO();
+        if (GetInput()->CurrentClickCount() == 1 && !GetUIManager()->IsInteracting() && !GetUIManager()->IsMouseOverUI())
+        {
+            EntityVM->HandleClick();
+        }
 
-        glm::mat4 view = mCamera->View();
-        glm::mat4 projection = mCamera->Projection();
-        glm::mat4 identity{ 1.0f };
+        if (GetInput()->WasKeyboardKeyUnpressed(KeyboardKey::T))
+            mCurrentGizmoOperation = ImGuizmo::TRANSLATE;
 
-        ImGuizmo::BeginFrame();
+        if (GetInput()->WasKeyboardKeyUnpressed(KeyboardKey::R))
+            mCurrentGizmoOperation = ImGuizmo::ROTATE;
 
-        ImGui::SetNextWindowPos(ImVec2(1024, 100));
-        ImGui::SetNextWindowSize(ImVec2(256, 256));
+        if (GetInput()->WasKeyboardKeyUnpressed(KeyboardKey::S))
+            mCurrentGizmoOperation = ImGuizmo::SCALE;
 
-        // create a window and insert the inspector
-        ImGui::SetNextWindowPos(ImVec2(10, 10));
-        ImGui::SetNextWindowSize(ImVec2(320, 340));
-        ImGui::Begin("Editor");
-        ImGui::Text("Camera");
+        if (mCurrentGizmoOperation == ImGuizmo::ROTATE && !EntityVM->AreRotationsAllowed())
+            mCurrentGizmoOperation = ImGuizmo::TRANSLATE;
+        
+        if (GetInput()->WasKeyboardKeyUnpressed(KeyboardKey::B))
+            mBoundSizing = !mBoundSizing;
 
-            //ImGui::SliderFloat("Fov", &fov, 20.f, 110.f);
+        if (GetInput()->WasKeyboardKeyUnpressed(KeyboardKey::W) && mCurrentGizmoOperation != ImGuizmo::SCALE)
+            mCurrentGizmoMode = mCurrentGizmoMode == ImGuizmo::LOCAL ? ImGuizmo::WORLD : ImGuizmo::LOCAL;
 
-        //viewDirty |= ImGui::SliderFloat("Distance", &camDistance, 1.f, 10.f);
+        CameraVM->Import();
+        EntityVM->Import();
 
-        ImGui::Text("X: %f Y: %f", io.MousePos.x, io.MousePos.y);
-        ImGuizmo::DrawGrid(glm::value_ptr(view), glm::value_ptr(projection), glm::value_ptr(identity), 100.f);
-        /*  ImGuizmo::DrawCubes(cameraView, cameraProjection, &objectMatrix[0][0], gizmoCount);
-          ImGui::Separator();
-          for (int matId = 0; matId < gizmoCount; matId++)
-          {
-              ImGuizmo::SetID(matId);
+        ImGui::Begin("Editor", nullptr, ImGuiWindowFlags_AlwaysAutoResize);
 
-              EditTransform(cameraView, cameraProjection, objectMatrix[matId], lastUsing == matId);
-              if (ImGuizmo::IsUsing())
-              {
-                  lastUsing = matId;
-              }
-          }*/
+        DrawCameraControls();
+        DrawImGuizmoControls();
+
+        mIsInteracting = EntityVM->ShouldDisplay() || ImGuizmo::IsUsing();
 
         ImGui::End();
+
+        CameraVM->Export();
+        EntityVM->Export();
+    }
+
+    bool SceneManipulatorViewController::IsInteracting() const
+    {
+        return mIsInteracting;
     }
 
 }

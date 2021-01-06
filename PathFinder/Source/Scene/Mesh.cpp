@@ -1,6 +1,6 @@
 #include "Mesh.hpp"
 
-#include "../Geometry/Triangle3D.hpp"
+#include <Geometry/Triangle3D.hpp>
 
 namespace PathFinder
 {
@@ -8,11 +8,6 @@ namespace PathFinder
     const std::string& Mesh::Name() const
     {
         return mName;
-    }
-
-    const std::string& Mesh::MaterialName() const
-    {
-        return mMaterialName;
     }
 
     std::vector<Vertex1P1N1UV1T1BT>& Mesh::Vertices()
@@ -58,11 +53,6 @@ namespace PathFinder
     void Mesh::SetHasTangentSpace(bool hts)
     {
         mHasTangentSpace = hts;
-    }
-
-    void Mesh::SetMaterialName(const std::string& name)
-    {
-        mMaterialName = name;
     }
 
     void Mesh::SetVertexStorageLocation(const VertexStorageLocation& location)

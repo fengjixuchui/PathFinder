@@ -7,17 +7,22 @@ namespace Memory
         const HAL::Device* device,
         SegregatedPoolsResourceAllocator* resourceAllocator, 
         ResourceStateTracker* stateTracker, 
-        PoolDescriptorAllocator* descriptorAllocator)
+        PoolDescriptorAllocator* descriptorAllocator,
+        CopyRequestManager* copyRequestManager)
         : 
         mDevice{ device },
         mResourceAllocator{ resourceAllocator }, 
         mStateTracker{ stateTracker }, 
-        mDescriptorAllocator{ descriptorAllocator } {}
+        mDescriptorAllocator{ descriptorAllocator },
+        mCopyRequestManager{ copyRequestManager } {}
 
     GPUResourceProducer::TexturePtr GPUResourceProducer::NewTexture(const HAL::TextureProperties& properties)
     {
-        Texture* texture = new Texture{ properties, mStateTracker, mResourceAllocator, mDescriptorAllocator, this };
+        CheckFrameValidity();
+
+        Texture* texture = new Texture{ properties, mStateTracker, mResourceAllocator, mDescriptorAllocator, mCopyRequestManager };
         auto [iter, success] = mAllocatedResources.insert(texture);
+        texture->BeginFrame(mFrameNumber);
 
         auto deallocationCallback = [this, iter](Texture* texture)
         {
@@ -30,12 +35,15 @@ namespace Memory
 
     GPUResourceProducer::TexturePtr GPUResourceProducer::NewTexture(const HAL::TextureProperties& properties, const HAL::Heap& explicitHeap, uint64_t heapOffset)
     {
+        CheckFrameValidity();
+
         Texture* texture = new Texture{
             properties, mStateTracker, mResourceAllocator, mDescriptorAllocator, 
-            this, *mDevice, explicitHeap, heapOffset 
+            mCopyRequestManager, *mDevice, explicitHeap, heapOffset
         };
 
         auto [iter, success] = mAllocatedResources.insert(texture);
+        texture->BeginFrame(mFrameNumber);
 
         auto deallocationCallback = [this, iter](Texture* texture)
         {
@@ -48,8 +56,11 @@ namespace Memory
 
     GPUResourceProducer::TexturePtr GPUResourceProducer::NewTexture(HAL::Texture* existingTexture)
     {
-        Texture* texture = new Texture{ mStateTracker, mResourceAllocator, mDescriptorAllocator, this, existingTexture };
+        CheckFrameValidity();
+
+        Texture* texture = new Texture{ mStateTracker, mResourceAllocator, mDescriptorAllocator, mCopyRequestManager, existingTexture };
         auto [iter, success] = mAllocatedResources.insert(texture);
+        texture->BeginFrame(mFrameNumber);
 
         auto deallocationCallback = [this, iter](Texture* texture)
         {
@@ -60,9 +71,42 @@ namespace Memory
         return TexturePtr{ texture, deallocationCallback };
     }
 
-    void GPUResourceProducer::SetCommandList(HAL::CopyCommandListBase* commandList)
+    GPUResourceProducer::BufferPtr GPUResourceProducer::NewBuffer(const HAL::BufferProperties& properties, GPUResource::AccessStrategy accessStrategy)
     {
-        mCommandList = commandList;
+        CheckFrameValidity();
+
+        Buffer* buffer = new Buffer{ properties, accessStrategy, mStateTracker, mResourceAllocator, mDescriptorAllocator, mCopyRequestManager };
+        auto [iter, success] = mAllocatedResources.insert(buffer);
+        buffer->BeginFrame(mFrameNumber);
+
+        auto deallocationCallback = [this, iter](Buffer* buffer)
+        {
+            mAllocatedResources.erase(iter);
+            delete buffer;
+        };
+
+        return BufferPtr{ buffer, deallocationCallback };
+    }
+
+    GPUResourceProducer::BufferPtr GPUResourceProducer::NewBuffer(const HAL::BufferProperties& properties, const HAL::Heap& explicitHeap, uint64_t heapOffset)
+    {
+        CheckFrameValidity();
+
+        Buffer* buffer = new Buffer{
+            properties, mStateTracker, mResourceAllocator,
+            mDescriptorAllocator, mCopyRequestManager, *mDevice, explicitHeap, heapOffset
+        };
+
+        auto [iter, success] = mAllocatedResources.insert(buffer);
+        buffer->BeginFrame(mFrameNumber);
+
+        auto deallocationCallback = [this, iter](Buffer* buffer)
+        {
+            mAllocatedResources.erase(iter);
+            delete buffer;
+        };
+
+        return BufferPtr{ buffer, deallocationCallback };
     }
 
     void GPUResourceProducer::BeginFrame(uint64_t frameNumber)
@@ -83,9 +127,9 @@ namespace Memory
         }
     }
 
-    HAL::CopyCommandListBase* GPUResourceProducer::CommandList()
+    void GPUResourceProducer::CheckFrameValidity()
     {
-        return mCommandList;
+        assert_format(mFrameNumber > 0, "Allocations cannot happen before first frame start");
     }
 
 }

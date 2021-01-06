@@ -3,7 +3,7 @@
 #include "RenderPassUtilityProvider.hpp"
 #include "PipelineResourceStorage.hpp"
 
-#include "../Foundation/Name.hpp"
+#include <Foundation/Name.hpp>
 
 namespace PathFinder
 {
@@ -23,7 +23,7 @@ namespace PathFinder
         void AddRenderSubPass(RenderSubPass<ContentMediator>* pass);
 
         const HAL::TextureProperties& GetTextureProperties(Foundation::Name textureName) const;
-        const HAL::BufferProperties<uint8_t>& GetBufferProperties(Foundation::Name bufferName) const;
+        const HAL::BufferProperties& GetBufferProperties(Foundation::Name bufferName) const;
 
     private:
         const PipelineResourceStorage* mResourceStorage;

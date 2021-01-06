@@ -1,6 +1,6 @@
 #include "ShadingRenderPass.hpp"
 
-#include "../Foundation/Halton.hpp"
+#include <Foundation/Halton.hpp>
 
 namespace PathFinder
 {
@@ -10,7 +10,7 @@ namespace PathFinder
 
     void ShadingRenderPass::SetupPipelineStates(PipelineStateCreator* stateCreator, RootSignatureCreator* rootSignatureCreator)
     {
-        rootSignatureCreator->CreateRootSignature(RootSignatureNames::RayTracing, [](RootSignatureProxy& signatureProxy)
+        rootSignatureCreator->CreateRootSignature(RootSignatureNames::Shading, [](RootSignatureProxy& signatureProxy)
         {
             signatureProxy.AddRootConstantsParameter<uint32_t>(0, 0);
             signatureProxy.AddShaderResourceBufferParameter(0, 0); // Scene BVH | t0 - s0
@@ -23,7 +23,7 @@ namespace PathFinder
             state.RayGenerationShaderFileName = "Shading.hlsl";
             state.AddMissShader("Shading.hlsl");
             state.ShaderConfig = HAL::RayTracingShaderConfig{ sizeof(float), sizeof(float) * 2 };
-            state.GlobalRootSignatureName = RootSignatureNames::RayTracing;
+            state.GlobalRootSignatureName = RootSignatureNames::Shading;
             state.PipelineConfig = HAL::RayTracingPipelineConfig{ 1 };
         });
     }
@@ -83,19 +83,19 @@ namespace PathFinder
         const Memory::Buffer* lights = sceneStorage->LightTable();
         const Memory::Buffer* materials = sceneStorage->MaterialTable();
 
-        context->GetCommandRecorder()->BindExternalBuffer(*bvh, 0, 0, HAL::ShaderRegister::ShaderResource);
-        context->GetCommandRecorder()->BindExternalBuffer(*lights, 1, 0, HAL::ShaderRegister::ShaderResource);
-        context->GetCommandRecorder()->BindExternalBuffer(*materials, 2, 0, HAL::ShaderRegister::ShaderResource);
+        if (bvh) context->GetCommandRecorder()->BindExternalBuffer(*bvh, 0, 0, HAL::ShaderRegister::ShaderResource);
+        if (lights) context->GetCommandRecorder()->BindExternalBuffer(*lights, 1, 0, HAL::ShaderRegister::ShaderResource);
+        if (materials) context->GetCommandRecorder()->BindExternalBuffer(*materials, 2, 0, HAL::ShaderRegister::ShaderResource);
+        
         context->GetCommandRecorder()->DispatchRays(context->GetDefaultRenderSurfaceDesc().Dimensions());
     }
 
     uint32_t ShadingRenderPass::CompressLightPartitionInfo(const GPULightTablePartitionInfo& info) const
     {
         uint32_t compressed = 0;
-        compressed |= (info.SphericalLightsOffset & 0xFF) << 24;
-        compressed |= (info.RectangularLightsOffset & 0xFF) << 16;
-        compressed |= (info.EllipticalLightsOffset & 0xFF) << 8;
-        compressed |= (info.TotalLightsCount & 0xFF);
+        compressed |= (info.SphericalLightsCount & 0xFF) << 24;
+        compressed |= (info.RectangularLightsCount & 0xFF) << 16;
+        compressed |= (info.EllipticalLightsCount & 0xFF) << 8;
         return compressed;
     }
 

@@ -2,9 +2,9 @@
 #include "RenderPass.hpp"
 #include "RenderPassGraph.hpp"
 
-#include "../Foundation/StringUtils.hpp"
-#include "../Foundation/Assert.hpp"
-#include "../Foundation/STDHelpers.hpp"
+#include <Foundation/StringUtils.hpp>
+
+#include <Foundation/STDHelpers.hpp>
 
 #include "RenderPasses/PipelineNames.hpp"
 
@@ -28,16 +28,7 @@ namespace PathFinder
         mDefaultRenderSurface{ defaultRenderSurface },
         mResourceProducer{ resourceProducer },
         mDescriptorAllocator{ descriptorAllocator },
-        mPassExecutionGraph{ passExecutionGraph } 
-    {
-        // Preallocate 
-        mGlobalRootConstantsBuffer = mResourceProducer->NewBuffer(
-            HAL::BufferProperties<uint8_t>{1024, 1, HAL::ResourceState::ConstantBuffer});
-
-        mPerFrameRootConstantsBuffer = mResourceProducer->NewBuffer(
-            HAL::BufferProperties<uint8_t>{1024, 1, HAL::ResourceState::ConstantBuffer},
-            Memory::GPUResource::UploadStrategy::DirectAccess);
-    }
+        mPassExecutionGraph{ passExecutionGraph } {}
 
     const HAL::RTDescriptor* PipelineResourceStorage::GetRenderTargetDescriptor(Foundation::Name resourceName, Foundation::Name passName, uint64_t mipIndex) const
     {
@@ -75,6 +66,20 @@ namespace PathFinder
 
     void PipelineResourceStorage::BeginFrame()
     {
+        // Preallocate 
+        if (!mGlobalRootConstantsBuffer)
+        {
+            mGlobalRootConstantsBuffer = mResourceProducer->NewBuffer(
+                HAL::BufferProperties::Create<uint8_t>(1024, 1, HAL::ResourceState::ConstantBuffer));
+        }
+        
+        if (!mPerFrameRootConstantsBuffer)
+        {
+            mPerFrameRootConstantsBuffer = mResourceProducer->NewBuffer(
+                HAL::BufferProperties::Create<uint8_t>(1024, 1, HAL::ResourceState::ConstantBuffer),
+                Memory::GPUResource::AccessStrategy::DirectUpload);
+        }
+            
         mPreviousFrameResources->clear();
         mPreviousFrameResourceMap->clear();
         mPreviousFrameDiffEntries->clear();
@@ -93,10 +98,16 @@ namespace PathFinder
         return mMemoryLayoutChanged;
     }
 
+    bool PipelineResourceStorage::IsMemoryAliasingEnabled() const
+    {
+        return mIsMemoryAliasingEnabled;
+    }
+
     void PipelineResourceStorage::StartResourceScheduling()
     {
         mSchedulingCreationRequests.clear();
         mSchedulingUsageRequests.clear();
+        mSchedulingReadbackRequests.clear();
         mPrimaryResourceCreationRequests.clear();
         mSecondaryResourceCreationRequests.clear();
         mAliasMap.clear();
@@ -175,6 +186,16 @@ namespace PathFinder
             PipelineResourceStorageResource& resourceData = mCurrentFrameResources->at(indexIt->second);
             request.Configurator(resourceData.SchedulingInfo);
         }
+
+        // Run scheduling readback callbacks
+        for (SchedulingRequest& request : mSchedulingReadbackRequests)
+        {
+            auto indexIt = mCurrentFrameResourceMap->find(request.ResourceName);
+            assert_format(indexIt != mCurrentFrameResourceMap->end(), "Trying to readback a resource that wasn't created: ", request.ResourceName.ToString());
+
+            PipelineResourceStorageResource& resourceData = mCurrentFrameResources->at(indexIt->second);
+            request.Configurator(resourceData.SchedulingInfo);
+        }
     }
 
     void PipelineResourceStorage::AllocateScheduledResources()
@@ -246,13 +267,13 @@ namespace PathFinder
                 std::visit(Foundation::MakeVisitor(
                     [&resourceData, heap, this](const HAL::TextureProperties& textureProps)
                     {
-                        resourceData.Texture = resourceData.SchedulingInfo.CanBeAliased  ?
+                        resourceData.Texture = resourceData.SchedulingInfo.CanBeAliased ?
                             mResourceProducer->NewTexture(textureProps, *heap, resourceData.SchedulingInfo.HeapOffset) :
                             mResourceProducer->NewTexture(textureProps);
 
                         resourceData.Texture->SetDebugName(resourceData.SchedulingInfo.CombinedResourceNames());
                     },
-                    [&resourceData, heap, this](const HAL::ByteBufferProperties& bufferProps)
+                    [&resourceData, heap, this](const HAL::BufferProperties& bufferProps)
                     {
                         resourceData.Buffer = resourceData.SchedulingInfo.CanBeAliased ?
                             mResourceProducer->NewBuffer(bufferProps, *heap, resourceData.SchedulingInfo.HeapOffset) :
@@ -265,9 +286,9 @@ namespace PathFinder
         }
     }
 
-    void PipelineResourceStorage::QueueTextureAllocationIfNeeded(
+    void PipelineResourceStorage::QueueResourceAllocationIfNeeded(
         ResourceName resourceName,
-        const HAL::TextureProperties& properties,
+        const HAL::ResourcePropertiesVariant& properties,
         std::optional<Foundation::Name> propertyCopySourceName,
         const SchedulingInfoConfigurator& siConfigurator)
     {
@@ -294,6 +315,11 @@ namespace PathFinder
         }
     }
 
+    void PipelineResourceStorage::QueueResourceReadback(ResourceName resourceName, const SchedulingInfoConfigurator& siConfigurator)
+    {
+        mSchedulingReadbackRequests.push_back(SchedulingRequest{ siConfigurator, resourceName });
+    }
+
     void PipelineResourceStorage::AddSampler(Foundation::Name samplerName, const HAL::Sampler& sampler)
     {
         assert_format(!mSamplers.contains(samplerName), "Sampler ", samplerName.ToString(), " already exists");
@@ -304,7 +330,7 @@ namespace PathFinder
     {
         auto [it, success] = mPerPassData.emplace(name, PipelineResourceStoragePass{});
 
-        HAL::BufferProperties<float> properties{ 1024 };
+        auto properties = HAL::BufferProperties::Create<float>(1024);
         it->second.PassDebugBuffer = mResourceProducer->NewBuffer(properties);
         it->second.PassDebugBuffer->SetDebugName(name.ToString() + " Debug Constant Buffer");
         it->second.PassDebugBuffer->RequestWrite();
@@ -438,6 +464,11 @@ namespace PathFinder
                 func(resourceName, debugData);
             });
         }*/
+    }
+
+    void PipelineResourceStorage::SetMemoryAliasingEnabled(bool enabled)
+    {
+        mIsMemoryAliasingEnabled = enabled;
     }
 
 }

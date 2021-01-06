@@ -1,6 +1,6 @@
 #pragma once
 
-#include "../Foundation/Name.hpp"
+#include <Foundation/Name.hpp>
 
 #include <array>
 
@@ -42,7 +42,7 @@ namespace PathFinder
         inline Foundation::Name StochasticUnshadowedShadingPostBlurred{ "Resource_Shading_Stochastic_Unshadowed_Post_Blurred" };
         inline Foundation::Name StochasticShadowedShadingPostBlurred{ "Resource_Shading_Stochastic_Shadowed_Post_Blurred" };
         inline Foundation::Name CombinedShading{ "Resource_Shading_Combined" };
-        inline Foundation::Name CombinedShadingOverexposed{ "Resource_Shading_Combined_Overexposed" };
+        inline Foundation::Name CombinedShadingOversaturated{ "Resource_Shading_Combined_Oversaturated" };
         inline Foundation::Name DenoiserPrimaryGradientInputs{ "Denoiser_Primary_Gradient_Inputs" };
         inline Foundation::Name DenoiserPrimaryGradient{ "Denoiser_Primary_Gradient" };
         inline Foundation::Name DenoiserSecondaryGradient{ "Denoiser_Secondary_Gradient" };
@@ -58,12 +58,15 @@ namespace PathFinder
         inline Foundation::Name BloomBlurIntermediate{ "Resource_Bloom_Blur_Intermediate" };
         inline Foundation::Name BloomBlurOutput{ "Resource_Bloom_Blur_Output" };
         inline Foundation::Name BloomCompositionOutput{ "Resource_Bloom_Composition_Output" };
+        inline Foundation::Name LuminanceHistogram{ "Resource_Luminance_Histogram" };
         inline Foundation::Name ToneMappingOutput{ "Resource_ToneMapping_Output" };
         inline Foundation::Name UIOutput{ "Resource_UI_Output" };
 
         inline Foundation::Name SMAADetectedEdges{ "Resource_SMAA_Detected_Edges" };
         inline Foundation::Name SMAABlendingWeights{ "Resource_SMAA_Blending_Weights" };
         inline Foundation::Name SMAAAntialiased{ "Resource_SMAA_Antialiased_Image" };
+
+        inline Foundation::Name PickedGeometryInfo{ "Resource_Picked_Geometry_Info" };
     }
 
     namespace PSONames
@@ -76,6 +79,8 @@ namespace PathFinder
         inline Foundation::Name GBufferMeshes{ "PSO_GBufferMeshes" };
         inline Foundation::Name GBufferLights{ "PSO_GBufferLights" };
         inline Foundation::Name Shading{ "PSO_Shading" };
+        inline Foundation::Name GIUpdate{ "PSO_GI_Update" };
+        inline Foundation::Name GeometryPicking{ "PSO_GeometryPicking" };
         inline Foundation::Name DeferredLighting{ "PSO_DeferredLighting" };
         inline Foundation::Name SeparableBlur{ "PSO_SeparableBlur" };
         inline Foundation::Name BloomBlur{ "PSO_BloomBlur" };
@@ -94,17 +99,22 @@ namespace PathFinder
         inline Foundation::Name SMAABlendingWeightCalculation{ "PSO_SMAABlendingWeightCalculation" };
         inline Foundation::Name SMAANeighborhoodBlending{ "PSO_SMAANeighborhoodBlending" };
         inline Foundation::Name UI{ "PSO_UI" };
-        inline Foundation::Name BackBufferOutput{ "PSO_BackBufferOutput" };
+        inline Foundation::Name SDRBackBufferOutput{ "PSO_SDRBackBufferOutput" };
+        inline Foundation::Name HDRBackBufferOutput{ "PSO_HDRBackBufferOutput" };
         inline Foundation::Name UAVClear{ "PSO_UAVClear" };
         inline Foundation::Name BoxBlur{ "PSO_BoxBlur" };
     }  
    
     namespace RootSignatureNames
     {
+        inline Foundation::Name UAVClear{ "UAVClear_Root_Sig" };
         inline Foundation::Name GBufferMeshes{ "GBuffer_Meshes_Root_Sig" };
         inline Foundation::Name GBufferLights{ "GBuffer_Lights_Root_Sig" };
         inline Foundation::Name DeferredLighting{ "Deferred_Lighting_Root_Sig" };
-        inline Foundation::Name RayTracing{ "Ray_Tracing_Root_Sig" };
+        inline Foundation::Name Shading{ "Shading_Root_Sig" };
+        inline Foundation::Name GIUpdate{ "GI_Update_Root_Sig" };
+        inline Foundation::Name ToneMapping{ "Tone_Mapping_Root_Sig" };
+        inline Foundation::Name GeometryPicking{ "Geometry_Picking_Root_Sig" };
         inline Foundation::Name UI{ "UI_Root_Sig" };
         inline Foundation::Name DisplacementDistanceMapGeneration{ "Distance_Map_Generation_Root_Sig" };
     }

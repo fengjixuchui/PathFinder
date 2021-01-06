@@ -1,5 +1,5 @@
-#include "../Foundation/MemoryUtils.hpp"
-#include "../Foundation/Assert.hpp"
+#include <Foundation/MemoryUtils.hpp>
+
 
 namespace Memory
 {
@@ -33,7 +33,7 @@ namespace Memory
     template <class T>
     void GPUResource::Read(const ReadbackSession<T>& session) const
     {
-        assert_format(mUploadStrategy != UploadStrategy::DirectAccess, "DirectAccess upload resource does not support reads");
+        assert_format(mAccessStrategy != AccessStrategy::DirectUpload, "DirectUpload resource does not support CPU reads");
 
         if (!mCompletedReadbackBuffer)
         {

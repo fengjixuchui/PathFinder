@@ -1,7 +1,7 @@
 #include "InputHandlerWindows.hpp"
 
-#include "../Foundation/Assert.hpp"
-#include "../Foundation/StringUtils.hpp"
+
+#include <Foundation/StringUtils.hpp>
 
 namespace PathFinder
 {
@@ -65,11 +65,6 @@ namespace PathFinder
         if (list) std::free(list);
     }
 
-    void InputHandlerWindows::EndFrame()
-    {
-        mInput->BeginFrame();
-    }
-
     void InputHandlerWindows::HandleMessage(const MSG& winMsg)
     {
         // Only process input when in focus
@@ -119,11 +114,11 @@ namespace PathFinder
 
                 if (keyboard.Message == WM_KEYUP || keyboard.Message == WM_SYSKEYUP)
                 {
-                    mInput->KeyboardKeyUp(VKeyToKey(keyboard.VKey));
+                    mInput->KeyboardKeyUp(VKeyToKey(keyboard.VKey), (KeyboardScanCode)keyboard.MakeCode, keyboard.VKey);
                 }
                 if (keyboard.Message == WM_KEYDOWN || keyboard.Message == WM_SYSKEYDOWN)
                 {
-                    mInput->KeyboardKeyDown(VKeyToKey(keyboard.VKey));
+                    mInput->KeyboardKeyDown(VKeyToKey(keyboard.VKey), (KeyboardScanCode)keyboard.MakeCode, keyboard.VKey);
                 }
             }
         }

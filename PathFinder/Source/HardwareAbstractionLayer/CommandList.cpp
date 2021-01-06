@@ -41,6 +41,16 @@ namespace HAL
         }
     }
 
+    void CommandList::ExtractQueryData(const QueryHeap& heap, uint64_t startIndex, uint64_t queryCount, const Buffer& readbackBuffer)
+    {
+        mList->ResolveQueryData(heap.D3DQueryHeap(), heap.D3DQueryType(), startIndex, queryCount, readbackBuffer.D3DResource(), 0);
+    }
+
+    void CommandList::EndQuery(const QueryHeap& heap, uint64_t queryIndex)
+    {
+        mList->EndQuery(heap.D3DQueryHeap(), heap.D3DQueryType(), queryIndex);
+    }
+
     void CommandList::SetDebugName(const std::string& name)
     {
         mList->SetName(StringToWString(name).c_str());
@@ -198,8 +208,12 @@ namespace HAL
     {
         auto d3dViewport = viewport.D3DViewport();
         mList->RSSetViewports(1, &d3dViewport);
-        D3D12_RECT scissorRect{ viewport.X, viewport.Y, viewport.Width, viewport.Height };
-        mList->RSSetScissorRects(1, &scissorRect);
+    }
+
+    void GraphicsCommandListBase::SetScissor(const Geometry::Rect2D& scissorRect)
+    {
+        D3D12_RECT d3dRect{ scissorRect.Origin.x, scissorRect.Origin.y, scissorRect.Size.Width, scissorRect.Size.Height };
+        mList->RSSetScissorRects(1, &d3dRect);
     }
 
     void GraphicsCommandListBase::SetRenderTarget(const RTDescriptor& rtDescriptor, const DSDescriptor* depthStencilDescriptor)

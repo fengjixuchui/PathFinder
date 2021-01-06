@@ -6,19 +6,20 @@
 #include <filesystem>
 #include <chrono>
 
-#include "../HardwareAbstractionLayer/Device.hpp"
-#include "../HardwareAbstractionLayer/SwapChain.hpp"
-#include "../HardwareAbstractionLayer/DisplayAdapterFetcher.hpp"
+#include <HardwareAbstractionLayer/Device.hpp>
+#include <HardwareAbstractionLayer/SwapChain.hpp>
+#include <HardwareAbstractionLayer/DisplayAdapterFetcher.hpp>
 
-#include "../Scene/Scene.hpp"
-#include "../Foundation/Event.hpp"
-#include "../IO/CommandLineParser.hpp"
-#include "../Utility/AftermathCrashTracker.hpp"
+#include <Scene/Scene.hpp>
+#include <Foundation/Event.hpp>
+#include <IO/CommandLineParser.hpp>
+#include <Utility/AftermathCrashTracker.hpp>
 
-#include "../Memory/SegregatedPoolsResourceAllocator.hpp"
-#include "../Memory/PoolDescriptorAllocator.hpp"
-#include "../Memory/ResourceStateTracker.hpp"
-#include "../Memory/GPUResourceProducer.hpp"
+#include <Memory/SegregatedPoolsResourceAllocator.hpp>
+#include <Memory/PoolDescriptorAllocator.hpp>
+#include <Memory/ResourceStateTracker.hpp>
+#include <Memory/GPUResourceProducer.hpp>
+#include <Memory/CopyRequestManager.hpp>
 
 #include "RenderPassMediators/ResourceScheduler.hpp"
 #include "RenderPassMediators/RootConstantsUpdater.hpp"
@@ -29,7 +30,6 @@
 #include "RenderPassMediators/SamplerCreator.hpp"
 #include "RenderPassMediators/RenderPassUtilityProvider.hpp"
 
-#include "SceneGPUStorage.hpp"
 #include "PipelineResourceStorage.hpp"
 #include "PreprocessableAssetStorage.hpp"
 #include "RenderDevice.hpp"
@@ -37,9 +37,10 @@
 #include "PipelineStateManager.hpp"
 #include "RenderContext.hpp"
 #include "RenderPassGraph.hpp"
-#include "UIGPUStorage.hpp"
 #include "BottomRTAS.hpp"
 #include "TopRTAS.hpp"
+#include "GPUProfiler.hpp"
+#include "FrameFence.hpp"
 
 namespace PathFinder
 {
@@ -56,7 +57,6 @@ namespace PathFinder
 
         void AddRenderPass(RenderPass<ContentMediator>* pass);
 
-        void UploadProcessAndTransferAssets();
         void Render();
         void FlushAllQueuedFrames();
 
@@ -75,10 +75,11 @@ namespace PathFinder
         void NotifyStartFrame(uint64_t newFrameNumber);
         void NotifyEndFrame(uint64_t completedFrameNumber);
         void MoveToNextFrame();
+        void UploadAssets();
         void BuildAccelerationStructures();
-        void RunAssetProcessingPasses();
         void RecordCommandLists();
         void ScheduleFrame();
+        void UpdateBackBuffers();
 
         RenderPassGraph mRenderPassGraph;
 
@@ -97,6 +98,7 @@ namespace PathFinder
         std::unique_ptr<Memory::PoolCommandListAllocator> mCommandListAllocator;
         std::unique_ptr<Memory::PoolDescriptorAllocator> mDescriptorAllocator;
         std::unique_ptr<Memory::ResourceStateTracker> mResourceStateTracker;
+        std::unique_ptr<Memory::CopyRequestManager> mCopyRequestManager;
         std::unique_ptr<Memory::GPUResourceProducer> mResourceProducer;
 
         std::unique_ptr<AftermathCrashTracker> mAftermathCrashTracker;
@@ -112,10 +114,12 @@ namespace PathFinder
         std::unique_ptr<RootSignatureCreator> mRootSignatureCreator;
         std::unique_ptr<RenderDevice> mRenderDevice;
         std::unique_ptr<RenderPassContainer<ContentMediator>> mRenderPassContainer;
+        std::unique_ptr<GPUProfiler> mGPUProfiler;
 
         std::unique_ptr<HAL::SwapChain> mSwapChain;
-        std::unique_ptr<HAL::Fence> mFrameFence;
+        std::unique_ptr<FrameFence> mFrameFence;
 
+        HAL::DisplayAdapter* mSelectedAdapter = nullptr;
         ContentMediator* mContentMediator = nullptr;
 
         Event mPreRenderEvent;
@@ -130,10 +134,13 @@ namespace PathFinder
         inline PipelineResourceStorage* ResourceStorage() { return mPipelineResourceStorage.get(); }
         inline const RenderSurfaceDescription& RenderSurface() const { return mRenderSurfaceDescription; }
         inline Memory::GPUResourceProducer* ResourceProducer() { return mResourceProducer.get(); }
+        inline RenderDevice* RendererDevice() { return mRenderDevice.get(); }
         inline HAL::Device* Device() { return mDevice.get(); }
+        inline HAL::SwapChain* SwapChain() { return mSwapChain.get(); }
+        inline HAL::DisplayAdapter* SelectedAdapter() { return mSelectedAdapter; }
         inline Event& PreRenderEvent() { return mPreRenderEvent; }
         inline Event& PostRenderEvent() { return mPostRenderEvent; }
-        inline uint64_t FrameDurationMicroseconds() const { return mFrameDuration.count(); }
+        inline uint64_t FrameDurationUS() const { return mFrameDuration.count(); }
     };
 
 }

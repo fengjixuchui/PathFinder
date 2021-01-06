@@ -8,12 +8,12 @@
 #include "PipelineResourceStoragePass.hpp"
 #include "PipelineResourceStorageResource.hpp"
 
-#include "../HardwareAbstractionLayer/DescriptorHeap.hpp"
-#include "../HardwareAbstractionLayer/SwapChain.hpp"
-#include "../Foundation/MemoryUtils.hpp"
-#include "../Memory/GPUResourceProducer.hpp"
-#include "../Memory/PoolDescriptorAllocator.hpp"
-#include "../Memory/ResourceStateTracker.hpp"
+#include <HardwareAbstractionLayer/DescriptorHeap.hpp>
+#include <HardwareAbstractionLayer/SwapChain.hpp>
+#include <Foundation/MemoryUtils.hpp>
+#include <Memory/GPUResourceProducer.hpp>
+#include <Memory/PoolDescriptorAllocator.hpp>
+#include <Memory/ResourceStateTracker.hpp>
 
 #include <vector>
 #include <functional>
@@ -55,6 +55,7 @@ namespace PathFinder
         void EndFrame();
 
         bool HasMemoryLayoutChange() const;
+        bool IsMemoryAliasingEnabled() const;
         
         PipelineResourceStoragePass& CreatePerPassData(PassName name);
 
@@ -80,21 +81,16 @@ namespace PathFinder
         const PipelineResourceStorageResource* GetPerResourceData(ResourceName name) const;
 
         void IterateDebugBuffers(const DebugBufferIteratorFunc& func) const;
+        void SetMemoryAliasingEnabled(bool enabled);
 
-        void QueueTextureAllocationIfNeeded(
+        void QueueResourceAllocationIfNeeded(
             ResourceName resourceName, 
-            const HAL::TextureProperties& properties, 
-            std::optional<Foundation::Name> propertyCopySourceName,
-            const SchedulingInfoConfigurator& siConfigurator);
-
-        template <class BufferDataT>
-        void QueueBufferAllocationIfNeeded(
-            ResourceName resourceName, 
-            const HAL::BufferProperties<BufferDataT>& properties, 
+            const HAL::ResourcePropertiesVariant& properties, 
             std::optional<Foundation::Name> propertyCopySourceName,
             const SchedulingInfoConfigurator& siConfigurator);
 
         void QueueResourceUsage(ResourceName resourceName, std::optional<ResourceName> aliasName, const SchedulingInfoConfigurator& siConfigurator);
+        void QueueResourceReadback(ResourceName resourceName, const SchedulingInfoConfigurator& siConfigurator);
         void AddSampler(Foundation::Name samplerName, const HAL::Sampler& sampler);
 
     private:
@@ -151,6 +147,7 @@ namespace PathFinder
 
         std::vector<SchedulingRequest> mSchedulingCreationRequests;
         std::vector<SchedulingRequest> mSchedulingUsageRequests;
+        std::vector<SchedulingRequest> mSchedulingReadbackRequests;
         std::vector<ResourceCreationRequest> mPrimaryResourceCreationRequests;
         std::vector<ResourceCreationRequest> mSecondaryResourceCreationRequests;
 
@@ -173,6 +170,7 @@ namespace PathFinder
         HAL::ResourceBarrierCollection mReadbackBarriers;
 
         bool mMemoryLayoutChanged = false;
+        bool mIsMemoryAliasingEnabled = true;
     };
 
 }

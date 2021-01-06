@@ -9,7 +9,8 @@
 #include "ResourceState.hpp"
 #include "Heap.hpp"
 
-#include "../Geometry/Dimensions.hpp"
+#include <Geometry/Dimensions.hpp>
+#include <Foundation/MemoryUtils.hpp>
 
 #include <glm/vec4.hpp>
 
@@ -50,9 +51,16 @@ namespace HAL
         R32_Signed, RG32_Signed, RGB32_Signed, RGBA32_Signed,
         R32_Unsigned, RG32_Unsigned, RGB32_Unsigned, RGBA32_Unsigned,
 
+        RGB10A2_Unorm,
+
         // Compressed formats
         BC1_Unsigned_Norm, BC2_Unsigned_Norm, BC3_Unsigned_Norm, BC4_Unsigned_Norm,
         BC5_Unsigned_Norm, BC5_Signed_Norm, BC7_Unsigned_Norm
+    };
+
+    enum class ColorSpace
+    {
+        Rec709, Rec2020
     };
 
     enum class DepthStencilFormat
@@ -63,6 +71,17 @@ namespace HAL
     enum class TextureKind { Texture1D, Texture2D, Texture3D };
 
     using FormatVariant = std::variant<TypelessColorFormat, ColorFormat, DepthStencilFormat>;
+
+    DXGI_FORMAT D3DFormat(TypelessColorFormat type);
+    DXGI_FORMAT D3DFormat(ColorFormat type);
+    DXGI_FORMAT D3DFormat(DepthStencilFormat type);
+    DXGI_FORMAT D3DFormat(FormatVariant type);
+    DXGI_COLOR_SPACE_TYPE D3DColorSpace(ColorSpace space);
+
+    std::pair<DXGI_FORMAT, std::optional<DXGI_FORMAT>> D3DDepthStecilShaderAccessFormats(DepthStencilFormat type);
+
+    FormatVariant FormatFromD3DFormat(DXGI_FORMAT format);
+    ColorSpace ColorSpaceFromD3DSpace(DXGI_COLOR_SPACE_TYPE space);
 
 
 
@@ -93,22 +112,34 @@ namespace HAL
 
 
 
-    template <class Element = uint8_t>
     struct BufferProperties
     {
-        uint64_t ElementCapacity = 1;
-        uint64_t ElementAlighnment = 1;
+        uint64_t Size = 1;
+        uint64_t Stride = 1;
         ResourceState InitialStateMask = ResourceState::Common;
         ResourceState ExpectedStateMask = ResourceState::Common;
 
-        BufferProperties(uint64_t capacity);
-        BufferProperties(uint64_t capacity, uint64_t alignment);
-        BufferProperties(uint64_t capacity, uint64_t alignment, ResourceState initialStates);
-        BufferProperties(uint64_t capacity, uint64_t alignment, ResourceState initialStates, ResourceState expectedStates);
+        BufferProperties() = delete;
+
+        template <class Element = uint8_t>
+        static BufferProperties Create(uint64_t capacity, uint64_t elementAlignment = 1, ResourceState initialStates = ResourceState::Common, ResourceState expectedStates = ResourceState::Common);
     };
 
-    using ByteBufferProperties = BufferProperties<uint8_t>;
-    using ResourcePropertiesVariant = std::variant<TextureProperties, ByteBufferProperties>;
+    template <class Element>
+    BufferProperties BufferProperties::Create(uint64_t capacity, uint64_t elementAlignment, ResourceState initialStates, ResourceState expectedStates)
+    {
+        BufferProperties properties{};
+        properties.Stride = Foundation::MemoryUtils::Align(sizeof(Element), elementAlignment);
+        properties.Size = properties.Stride * capacity;
+        properties.InitialStateMask = initialStates;
+        properties.ExpectedStateMask = expectedStates == ResourceState::Common ? initialStates : expectedStates;
+
+        return properties;
+    }
+
+
+
+    using ResourcePropertiesVariant = std::variant<TextureProperties, BufferProperties>;
 
 
 
@@ -116,20 +147,9 @@ namespace HAL
     {
     public:
         ResourceFormat(const Device* device, const TextureProperties& textureProperties);
-
-        template <typename BufferDataT>
-        ResourceFormat(const Device* device, const BufferProperties<BufferDataT>& bufferProperties);
+        ResourceFormat(const Device* device, const BufferProperties& bufferProperties);
 
         void SetExpectedStates(ResourceState expectedStates);
-
-        static DXGI_FORMAT D3DFormat(TypelessColorFormat type);
-        static DXGI_FORMAT D3DFormat(ColorFormat type);
-        static DXGI_FORMAT D3DFormat(DepthStencilFormat type);
-        static DXGI_FORMAT D3DFormat(FormatVariant type);
-
-        static std::pair<DXGI_FORMAT, std::optional<DXGI_FORMAT>> D3DDepthStecilShaderAccessFormats(DepthStencilFormat type);
-
-        static FormatVariant FormatFromD3DFormat(DXGI_FORMAT format);
 
     private:
         void ResolveBufferDemensionData(uint64_t byteCount);
@@ -149,7 +169,7 @@ namespace HAL
     public:
         inline const D3D12_RESOURCE_DESC& D3DResourceDescription() const { return mDescription; }
         inline const auto& GetTextureProperties() const { return std::get<TextureProperties>(mResourceProperties); }
-        inline const auto& GetBufferProperties() const { return std::get<BufferProperties<uint8_t>>(mResourceProperties); }
+        inline const auto& GetBufferProperties() const { return std::get<BufferProperties>(mResourceProperties); }
         inline const auto& ResourceProperties() const { return mResourceProperties; }
         inline auto ResourceAliasingGroup() const { return mAliasingGroup; }
         inline auto SubresourceCount() const { return mSubresourceCount; }
@@ -158,5 +178,3 @@ namespace HAL
     };
 
 }
-
-#include "ResourceFormat.inl"

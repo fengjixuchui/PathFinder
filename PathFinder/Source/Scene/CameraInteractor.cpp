@@ -1,8 +1,8 @@
 #include "CameraInteractor.hpp"
-#include "../Foundation/Pi.hpp"
+#include <Foundation/Pi.hpp>
 
 #include <windows.h>
-#include "../Foundation/StringUtils.hpp"
+#include <Foundation/StringUtils.hpp>
 
 #include <glm/gtc/epsilon.hpp>
 #include <glm/gtx/vector_angle.hpp>
@@ -23,6 +23,16 @@ namespace PathFinder
         mIsEnabled = enabled;
     }
 
+    void CameraInteractor::SetKeyboardControlsEnabled(bool enabled)
+    {
+        mIsKeyboardControlsEnabled = enabled;
+    }
+
+    void CameraInteractor::SetMouseControlsEnabled(bool enabled)
+    {
+        mIsMouseControlsEnabled = enabled;
+    }
+
     void CameraInteractor::SetViewportSize(const Geometry::Dimensions& viewportSize)
     {
         mViewportSize = { viewportSize.Width, viewportSize.Height };
@@ -30,6 +40,9 @@ namespace PathFinder
 
     void CameraInteractor::HandleKeyDown()
     {
+        if (!mIsKeyboardControlsEnabled)
+            return;
+
         glm::vec3 direction = glm::zero<glm::vec3>();
 
         if (mUserInput->IsKeyboardKeyPressed(KeyboardKey::W)) { direction += mCamera->Front(); }
@@ -49,6 +62,9 @@ namespace PathFinder
 
     void CameraInteractor::HandleMouseDrag()
     {
+        if (!mIsMouseControlsEnabled)
+            return;
+
         glm::vec2 mouseDirection = mUserInput->MouseDelta() * mInputScaleTimeAdjusted.MouseMovementScale;
 
         if (mUserInput->IsMouseButtonPressed(0) && mUserInput->IsMouseButtonPressed(1)) 
@@ -67,12 +83,6 @@ namespace PathFinder
             // Acting like FPS-style camera with 'noclip' enabled
             mRotation = mouseDirection;
         }
-        else if (mUserInput->IsMouseButtonPressed(0)) 
-        {
-            mRotation = IsMouseMovingVertically(mouseDirection) ?
-                glm::vec2{ 0.0f, mouseDirection.y } : 
-                glm::vec2{ mouseDirection.x, 0.0f };
-        }
         else if (mUserInput->IsMouseButtonPressed(1)) 
         {
             mRotation = mouseDirection;
@@ -87,6 +97,9 @@ namespace PathFinder
 
     void CameraInteractor::HandleMouseScroll()
     {
+        if (!mIsMouseControlsEnabled)
+            return;
+
         glm::vec2 scrollDelta = mUserInput->ScrollDelta();
         glm::vec3 front = mCamera->Front() * scrollDelta.y * -mInputScaleTimeAdjusted.MouseMovementScale;
         glm::vec3 right = mCamera->Right() * scrollDelta.x * mInputScaleTimeAdjusted.MouseMovementScale;

@@ -1,7 +1,5 @@
 #include "ResourceScheduler.hpp"
 
-#include "../Foundation/Assert.hpp"
-
 #include <cmath>
 
 namespace PathFinder
@@ -24,7 +22,7 @@ namespace PathFinder
         HAL::FormatVariant format = *props.ShaderVisibleFormat;
         if (props.TypelessFormat) format = *props.TypelessFormat;
 
-        mResourceStorage->QueueTextureAllocationIfNeeded(
+        mResourceStorage->QueueResourceAllocationIfNeeded(
             resourceName, 
             HAL::TextureProperties{ format, *props.Kind, *props.Dimensions, *props.ClearValues, HAL::ResourceState::Common, *props.MipCount },
             props.TextureToCopyPropertiesFrom,
@@ -38,7 +36,7 @@ namespace PathFinder
             this]
             (PipelineResourceSchedulingInfo& schedulingInfo)
             {
-                schedulingInfo.CanBeAliased = !canBeReadAcrossFrames;
+                schedulingInfo.CanBeAliased = !canBeReadAcrossFrames && mResourceStorage->IsMemoryAliasingEnabled();
                 RegisterGraphDependency(*passNode, writtenMips, resourceName, {}, schedulingInfo.ResourceFormat().GetTextureProperties().MipCount, true);
                 UpdateSubresourceInfos(
                     schedulingInfo,
@@ -57,7 +55,7 @@ namespace PathFinder
         bool canBeReadAcrossFrames = EnumMaskEquals(properties->Flags, Flags::CrossFrameRead);
         HAL::DepthStencilClearValue clearValue{ 1.0, 0 };
 
-        mResourceStorage->QueueTextureAllocationIfNeeded(
+        mResourceStorage->QueueResourceAllocationIfNeeded(
             resourceName,
             HAL::TextureProperties{ *props.Format, HAL::TextureKind::Texture2D, *props.Dimensions, clearValue, HAL::ResourceState::Common, *props.MipCount },
             props.TextureToCopyPropertiesFrom,
@@ -68,7 +66,7 @@ namespace PathFinder
             this]
             (PipelineResourceSchedulingInfo& schedulingInfo)
             {
-                schedulingInfo.CanBeAliased = !canBeReadAcrossFrames;
+                schedulingInfo.CanBeAliased = !canBeReadAcrossFrames && mResourceStorage->IsMemoryAliasingEnabled();
                 RegisterGraphDependency(*passNode, MipSet::FirstMip(), resourceName, {}, schedulingInfo.ResourceFormat().GetTextureProperties().MipCount, true);
                 UpdateSubresourceInfos(
                     schedulingInfo,
@@ -94,7 +92,7 @@ namespace PathFinder
         HAL::FormatVariant format = *props.ShaderVisibleFormat;
         if (props.TypelessFormat) format = *props.TypelessFormat;
 
-        mResourceStorage->QueueTextureAllocationIfNeeded(
+        mResourceStorage->QueueResourceAllocationIfNeeded(
             resourceName,
             HAL::TextureProperties{ format, *props.Kind, *props.Dimensions, *props.ClearValues, HAL::ResourceState::Common, *props.MipCount },
             props.TextureToCopyPropertiesFrom,
@@ -108,7 +106,7 @@ namespace PathFinder
             this]
             (PipelineResourceSchedulingInfo& schedulingInfo)
             {
-                schedulingInfo.CanBeAliased = !canBeReadAcrossFrames;
+                schedulingInfo.CanBeAliased = !canBeReadAcrossFrames && mResourceStorage->IsMemoryAliasingEnabled();
                 RegisterGraphDependency(*passNode, writtenMips, resourceName, {}, schedulingInfo.ResourceFormat().GetTextureProperties().MipCount, true);
                 UpdateSubresourceInfos(
                     schedulingInfo,
@@ -274,6 +272,16 @@ namespace PathFinder
     void ResourceScheduler::UseRayTracing()
     {
         mCurrentlySchedulingPassNode->UsesRayTracing = true;
+    }
+
+    void ResourceScheduler::Export(Foundation::Name resourceName)
+    {
+        mResourceStorage->QueueResourceReadback(resourceName, [resourceName, node = mCurrentlySchedulingPassNode](PipelineResourceSchedulingInfo& schedulingInfo)
+        {
+            PipelineResourceSchedulingInfo::PassInfo* passInfo = schedulingInfo.GetInfoForPass(node->PassMetadata().Name);
+            assert_format(passInfo, "Resource ", resourceName.ToString(), " wasn't scheduled for usage in ", node->PassMetadata().Name.ToString());
+            passInfo->IsReadbackRequested = true;
+        });
     }
 
     void ResourceScheduler::SetCurrentlySchedulingPassNode(RenderPassGraph::Node* node)

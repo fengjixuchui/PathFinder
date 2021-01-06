@@ -1,6 +1,6 @@
 #include "RayTracingAccelerationStructure.hpp"
 
-#include "../Foundation/Assert.hpp"
+
 
 #include <type_traits>
 
@@ -58,11 +58,11 @@ namespace HAL
         d3dGeometry.Triangles.VertexBuffer.StartAddress = geometry.VertexBuffer->GPUVirtualAddress() + geometry.VertexOffset * geometry.VertexStride;
         d3dGeometry.Triangles.VertexBuffer.StrideInBytes = geometry.VertexStride;
         d3dGeometry.Triangles.VertexCount = geometry.VertexCount;
-        d3dGeometry.Triangles.VertexFormat = ResourceFormat::D3DFormat(geometry.VertexPositionFormat);
+        d3dGeometry.Triangles.VertexFormat = D3DFormat(geometry.VertexPositionFormat);
 
         d3dGeometry.Triangles.IndexBuffer = geometry.IndexBuffer->GPUVirtualAddress() + geometry.IndexOffset * geometry.IndexStride;
         d3dGeometry.Triangles.IndexCount = geometry.IndexCount;
-        d3dGeometry.Triangles.IndexFormat = ResourceFormat::D3DFormat(geometry.IndexFormat);
+        d3dGeometry.Triangles.IndexFormat = D3DFormat(geometry.IndexFormat);
 
         d3dGeometry.Triangles.Transform3x4 = 0;
 
@@ -87,14 +87,14 @@ namespace HAL
 
 
 
-    void RayTracingTopAccelerationStructure::AddInstance(const RayTracingBottomAccelerationStructure& blas, uint32_t instanceId, const glm::mat4& transform)
+    void RayTracingTopAccelerationStructure::AddInstance(const RayTracingBottomAccelerationStructure& blas, const InstanceInfo& instanceInfo, const glm::mat4& transform)
     {
         assert_format(blas.FinalBuffer(), "Bottom-Level acceleration structure buffers must be allocated before using them in Top-Level structures");
 
         D3D12_RAYTRACING_INSTANCE_DESC instance{};
-        instance.InstanceID = instanceId;
+        instance.InstanceID = instanceInfo.InstanceID;
         instance.InstanceContributionToHitGroupIndex = 0; // Choose hit group shader
-        instance.InstanceMask = 1; // Bitwise AND with TraceRay() parameter, has to be non-zero or else will never be hit by a ray
+        instance.InstanceMask = instanceInfo.InstanceMask; // Bitwise AND with TraceRay() parameter, has to be non-zero or else will never be hit by a ray
         instance.Flags = D3D12_RAYTRACING_INSTANCE_FLAG_FORCE_OPAQUE; // Right now, only opaque, for simplicity
 
         instance.AccelerationStructure = blas.FinalBuffer()->GPUVirtualAddress();

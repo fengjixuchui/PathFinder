@@ -1,6 +1,6 @@
 #include "PipelineResourceSchedulingInfo.hpp"
 
-#include "../Foundation/Assert.hpp"
+
 
 namespace PathFinder
 {
@@ -60,7 +60,7 @@ namespace PathFinder
         {
             mSubresourceCombinedReadStates[subresourceIndex] |= state;
         }
-        else if (EnumMaskEquals(state, HAL::ResourceState::UnorderedAccess))
+        else if (EnumMaskContains(state, HAL::ResourceState::UnorderedAccess))
         {
             passInfo.NeedsUnorderedAccessBarrier = true;
         }

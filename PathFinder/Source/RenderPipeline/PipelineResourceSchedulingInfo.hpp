@@ -1,8 +1,8 @@
 #pragma once
 
-#include "../Foundation/Name.hpp"
-#include "../HardwareAbstractionLayer/ResourceState.hpp"
-#include "../HardwareAbstractionLayer/ResourceFormat.hpp"
+#include <Foundation/Name.hpp>
+#include <HardwareAbstractionLayer/ResourceState.hpp>
+#include <HardwareAbstractionLayer/ResourceFormat.hpp>
 
 #include "RenderPassGraph.hpp"
 
@@ -35,6 +35,7 @@ namespace PathFinder
             std::vector<std::optional<SubresourceInfo>> SubresourceInfos;
             bool NeedsUnorderedAccessBarrier = false;
             bool NeedsAliasingBarrier = false;
+            bool IsReadbackRequested = false;
         };
 
         PipelineResourceSchedulingInfo(Foundation::Name resourceName, const HAL::ResourceFormat& format);

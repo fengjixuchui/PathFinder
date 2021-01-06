@@ -3,6 +3,7 @@
 #include "SegregatedPoolsResourceAllocator.hpp"
 #include "ResourceStateTracker.hpp"
 #include "PoolDescriptorAllocator.hpp"
+#include "CopyRequestManager.hpp"
 #include "Buffer.hpp"
 #include "Texture.hpp"
 
@@ -11,7 +12,7 @@
 namespace Memory
 {
 
-    class GPUResourceProducer : public GPUResource::CopyCommandListProvider
+    class GPUResourceProducer
     {
     public:
         using BufferPtr = std::unique_ptr<Buffer, std::function<void(Buffer*)>>;
@@ -21,38 +22,33 @@ namespace Memory
             const HAL::Device* device, 
             SegregatedPoolsResourceAllocator* resourceAllocator,
             ResourceStateTracker* stateTracker,
-            PoolDescriptorAllocator* descriptorAllocator
+            PoolDescriptorAllocator* descriptorAllocator,
+            CopyRequestManager* copyRequestManager
         );
 
-        template <class Element>
-        BufferPtr NewBuffer(const HAL::BufferProperties<Element>& properties, GPUResource::UploadStrategy uploadStrategy = GPUResource::UploadStrategy::Automatic);
+        BufferPtr NewBuffer(const HAL::BufferProperties& properties, GPUResource::AccessStrategy accessStrategy = GPUResource::AccessStrategy::Automatic);
         TexturePtr NewTexture(const HAL::TextureProperties& properties);
 
-        template <class Element>
-        BufferPtr NewBuffer(const HAL::BufferProperties<Element>& properties, const HAL::Heap& explicitHeap, uint64_t heapOffset);
+        BufferPtr NewBuffer(const HAL::BufferProperties& properties, const HAL::Heap& explicitHeap, uint64_t heapOffset);
         TexturePtr NewTexture(const HAL::TextureProperties& properties, const HAL::Heap& explicitHeap, uint64_t heapOffset);
 
         TexturePtr NewTexture(HAL::Texture* existingTexture);
         
-        void SetCommandList(HAL::CopyCommandListBase* commandList);
-
         void BeginFrame(uint64_t frameNumber);
         void EndFrame(uint64_t frameNumber);
 
-        HAL::CopyCommandListBase* CommandList() override;
-
     private:
         using ResourceSetIterator = std::unordered_set<GPUResource*>::iterator;
+
+        void CheckFrameValidity();
 
         uint64_t mFrameNumber = 0;
         const HAL::Device* mDevice = nullptr;
         SegregatedPoolsResourceAllocator* mResourceAllocator = nullptr;
         ResourceStateTracker* mStateTracker = nullptr;
         PoolDescriptorAllocator* mDescriptorAllocator = nullptr;
-        HAL::CopyCommandListBase* mCommandList = nullptr;
+        CopyRequestManager* mCopyRequestManager = nullptr;
         std::unordered_set<GPUResource*> mAllocatedResources;
     };
 
 }
-
-#include "GPUResourceProducer.inl"

@@ -1,9 +1,8 @@
 #include "PipelineState.hpp"
 #include "Utils.h"
 
-#include "../Foundation/Assert.hpp"
-#include "../Foundation/STDHelpers.hpp"
-#include "../Foundation/StringUtils.hpp"
+#include <Foundation/STDHelpers.hpp>
+#include <Foundation/StringUtils.hpp>
 
 #include <d3d12.h>
 
@@ -45,24 +44,24 @@ namespace HAL
         desc.InputLayout = mInputLayout.D3DLayout();
         desc.PrimitiveTopologyType = D3DPrimitiveTopologyType(mPrimitiveTopology);
         desc.NumRenderTargets = (UINT)mRenderTargetFormats.size();
-        desc.DSVFormat = ResourceFormat::D3DFormat(mDepthStencilFormat);
+        desc.DSVFormat = D3DFormat(mDepthStencilFormat);
         desc.SampleDesc.Count = 1;
         desc.SampleDesc.Quality = 0;
         desc.SampleMask = 0xFFFFFFFF;
+        desc.NodeMask = mDevice->NodeMask();
         
         for (auto& keyValue : mRenderTargetFormats)
         {
             auto rtIdx = std::underlying_type<RenderTarget>::type(keyValue.first);
             std::visit([&desc, rtIdx](auto&& format) {
-                desc.RTVFormats[rtIdx] = ResourceFormat::D3DFormat(format);
+                desc.RTVFormats[rtIdx] = D3DFormat(format);
             }, keyValue.second);
         }
 
         //desc.IBStripCutValue;
         //desc.SampleMask;
         //desc.StreamOutput;
-        /*desc.NodeMask;
-        desc.CachedPSO;*/
+        //desc.CachedPSO;
 
 #if defined(DEBUG) || defined(_DEBUG) 
         //desc.Flags = D3D12_PIPELINE_STATE_FLAG_TOOL_DEBUG;
@@ -97,7 +96,7 @@ namespace HAL
 
         desc.pRootSignature = mRootSignature->D3DSignature();
         desc.CS = mComputeShader->D3DBytecode();
-        desc.NodeMask = 0;
+        desc.NodeMask = mDevice->NodeMask();
         
 #if defined(DEBUG) || defined(_DEBUG) 
         //desc.Flags = D3D12_PIPELINE_STATE_FLAG_TOOL_DEBUG;
@@ -228,16 +227,23 @@ namespace HAL
 
         GenerateLibraryExportCollectionsAndHitGroups();
 
+        uint64_t subobjectCountPerShader = 6;
+        uint64_t associationCountPerShader = 2;
+
         uint64_t subobjectsToReserve =
-            mLibraryExportCollections.size() * 5 + // Each Association can produce up to 5 subobjects
+            subobjectCountPerShader + 
+            mMissShaders.size() * subobjectCountPerShader + 
+            mCallableShaders.size() * subobjectCountPerShader + 
+            mHitGroupShaders.size() * subobjectCountPerShader + // Each Association can produce up to 6 subobjects
             mHitGroups.size() + // Each hit group produces 1 subobject
             2; // 1 global root sig subobject and 1 pipeline config subobject
 
         // Each Association can produce up to 2 association subobjects
-        uint64_t associationsToReserve = mLibraryExportCollections.size() * 2; 
-            
-        subobjectsToReserve = 100;
-        associationsToReserve = 100;
+        uint64_t associationsToReserve = 
+            associationCountPerShader + 
+            mMissShaders.size() * associationCountPerShader +
+            mCallableShaders.size() * associationCountPerShader +
+            mHitGroupShaders.size() * associationCountPerShader;
 
         // Reserve vectors to avoid pointer invalidation on pushes and emplacements
         mSubobjects.reserve(subobjectsToReserve);
@@ -406,8 +412,6 @@ namespace HAL
     void RayTracingPipelineState::AddLibraryExportsCollectionSubobject(const LibraryExportsCollection& exports)
     {
         const D3D12_DXIL_LIBRARY_DESC& d3dExportsCollection = exports.GetD3DLibraryExports();
-
-        //mExportNamePointerHolder.emplace_back(exports.Export().ExportName().c_str());
 
         // Hold in memory until compilation
         D3D12_STATE_SUBOBJECT& librarySubobject = 

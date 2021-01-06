@@ -1,6 +1,6 @@
 #include "CommandLineParser.hpp"
 
-#include "../Foundation/Assert.hpp"
+
 
 namespace PathFinder
 {
@@ -43,6 +43,11 @@ namespace PathFinder
         if (strcmp(argv, "-warp") == 0)
         {
             mUseWARPDevice = true;
+        }
+
+        if (strcmp(argv, "-no_memory_aliasing") == 0)
+        {
+            mDisableMemoryAliasing = true;
         }
     }
 

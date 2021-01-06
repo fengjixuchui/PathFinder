@@ -2,8 +2,8 @@
 #include "Utils.h"
 #include "ResourceFootprint.hpp"
 
-#include "../Foundation/STDHelpers.hpp"
-#include "../Foundation/StringUtils.hpp"
+#include <Foundation/STDHelpers.hpp>
+#include <Foundation/StringUtils.hpp>
 
 #include <vector>
 
@@ -28,7 +28,7 @@ namespace HAL
         std::visit(Foundation::MakeVisitor(
             [&](const TextureProperties& props)
             {
-                d3dClearValue = D3DClearValue(props.OptimizedClearValue, ResourceFormat::D3DFormat(props.Format));
+                d3dClearValue = D3DClearValue(props.OptimizedClearValue, D3DFormat(props.Format));
                 mInitialStates = props.InitialStateMask;
                 mExpectedStates = props.ExpectedStateMask;
 
@@ -36,7 +36,7 @@ namespace HAL
                     EnumMaskEquals(mExpectedStates, ResourceState::RenderTarget) ||
                     EnumMaskEquals(mExpectedStates, ResourceState::DepthWrite);
             },
-            [&](const BufferProperties<uint8_t>& props)
+            [&](const BufferProperties& props)
             {
                 mInitialStates = props.InitialStateMask;
                 mExpectedStates = props.ExpectedStateMask;
@@ -106,7 +106,7 @@ namespace HAL
             std::visit(Foundation::MakeVisitor(
                 [&](const TextureProperties& props)
                 {
-                    d3dClearValue = D3DClearValue(props.OptimizedClearValue, ResourceFormat::D3DFormat(props.Format));
+                    d3dClearValue = D3DClearValue(props.OptimizedClearValue, D3DFormat(props.Format));
                     mInitialStates = props.InitialStateMask;
                     mExpectedStates = props.ExpectedStateMask;
 
@@ -114,7 +114,7 @@ namespace HAL
                         EnumMaskEquals(mExpectedStates, ResourceState::RenderTarget) ||
                         EnumMaskEquals(mExpectedStates, ResourceState::DepthWrite);
                 },
-                [&](const BufferProperties<uint8_t>& props)
+                [&](const BufferProperties& props)
                 {
                     mInitialStates = props.InitialStateMask;
                     mExpectedStates = props.ExpectedStateMask;

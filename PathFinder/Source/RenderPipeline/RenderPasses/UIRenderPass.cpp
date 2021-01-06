@@ -25,6 +25,7 @@ namespace PathFinder
             state.RootSignatureName = RootSignatureNames::UI;
             state.DepthStencilState.SetDepthTestEnabled(false);
             state.RasterizerState.SetFrontClockwise(true); // ImGui is Clockwise for front face
+            state.RasterizerState.SetCullMode(HAL::RasterizerState::CullMode::None);
             state.BlendState = AlphaBlendingState();
         });
     }
@@ -62,6 +63,7 @@ namespace PathFinder
             offsets.IndexBufferOffset = drawCommand.IndexBufferOffset;
 
             context->GetCommandRecorder()->SetRootConstants(offsets, 0, 0);
+            context->GetCommandRecorder()->SetScissor(drawCommand.ScissorRect);
             context->GetCommandRecorder()->Draw(drawCommand.IndexCount);
         }
     }

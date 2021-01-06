@@ -1,8 +1,8 @@
 #pragma once
 
-#include "../Foundation/Name.hpp"
-#include "../HardwareAbstractionLayer/Resource.hpp"
-#include "../HardwareAbstractionLayer/ResourceFormat.hpp"
+#include <Foundation/Name.hpp>
+#include <HardwareAbstractionLayer/Resource.hpp>
+#include <HardwareAbstractionLayer/ResourceFormat.hpp>
 
 #include "PipelineResourceSchedulingInfo.hpp"
 #include "RenderPassGraph.hpp"
@@ -11,8 +11,9 @@
 
 namespace PathFinder
 {
-
     // Helper class to determine memory aliasing properties
+    // https://levelup.gitconnected.com/gpu-memory-aliasing-45933681a15e
+
     class PipelineResourceMemoryAliaser
     {
     public:

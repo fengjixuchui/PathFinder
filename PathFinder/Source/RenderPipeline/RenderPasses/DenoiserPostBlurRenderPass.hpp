@@ -4,6 +4,7 @@
 #include "../RenderPassContentMediator.hpp"
 
 #include "PipelineNames.hpp"
+#include "DownsamplingRenderSubPass.hpp"
 
 namespace PathFinder
 {

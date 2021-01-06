@@ -2,31 +2,29 @@
 
 #include "GPUResource.hpp"
 
-#include "../HardwareAbstractionLayer/Buffer.hpp"
+#include <HardwareAbstractionLayer/Buffer.hpp>
 
 namespace Memory
 {
-   
+
     class Buffer : public GPUResource
     {
     public:
-        template <class Element>
         Buffer(
-            const HAL::BufferProperties<Element>& properties,
-            GPUResource::UploadStrategy uploadStrategy,
+            const HAL::BufferProperties& properties,
+            GPUResource::AccessStrategy accessStrategy,
             ResourceStateTracker* stateTracker,
             SegregatedPoolsResourceAllocator* resourceAllocator, 
             PoolDescriptorAllocator* descriptorAllocator,
-            CopyCommandListProvider* commandListProvider
+            CopyRequestManager* copyRequestManager
         );
 
-        template <class Element>
         Buffer(
-            const HAL::BufferProperties<Element>& properties,
+            const HAL::BufferProperties& properties,
             ResourceStateTracker* stateTracker,
             SegregatedPoolsResourceAllocator* resourceAllocator,
             PoolDescriptorAllocator* descriptorAllocator,
-            CopyCommandListProvider* commandListProvider,
+            CopyRequestManager* copyRequestManager,
             const HAL::Device& device,
             const HAL::Heap& mainResourceExplicitHeap,
             uint64_t explicitHeapOffset
@@ -44,16 +42,20 @@ namespace Memory
         const HAL::Buffer* HALBuffer() const;
         const HAL::Resource* HALResource() const override;
 
+        void BeginFrame(uint64_t frameNumber) override;
+
     protected:
         uint64_t ResourceSizeInBytes() const override;
         void ApplyDebugName() override;
-        void RecordUploadCommands() override;
-        void RecordReadbackCommands() override;
+        CopyRequestManager::CopyCommand GetUploadCommands() override;
+        CopyRequestManager::CopyCommand GetReadbackCommands() override;
 
     private:
         uint64_t mRequstedStride = 1;
+        HAL::BufferProperties mProperties;
 
         SegregatedPoolsResourceAllocator::BufferPtr mBufferPtr;
+        HAL::Buffer* mGetterBufferPtr = nullptr;
 
         // Cached values, to be mutated from getters
         mutable uint64_t mCBDescriptorRequestFrameNumber = 0;
@@ -61,6 +63,9 @@ namespace Memory
         mutable PoolDescriptorAllocator::SRDescriptorPtr mSRDescriptor;
         mutable PoolDescriptorAllocator::UADescriptorPtr mUADescriptor;
         mutable PoolDescriptorAllocator::CBDescriptorPtr mCBDescriptor;
+
+    public:
+        inline const auto& Properties() const { return mProperties; }
     };
 
 }

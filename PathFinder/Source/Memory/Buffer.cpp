@@ -1,11 +1,60 @@
 #include "Buffer.hpp"
+#include "CopyRequestManager.hpp"
 
 namespace Memory
 {
 
+    Buffer::Buffer(
+        const HAL::BufferProperties& properties, 
+        GPUResource::AccessStrategy accessStrategy, 
+        ResourceStateTracker* stateTracker,
+        SegregatedPoolsResourceAllocator* resourceAllocator, 
+        PoolDescriptorAllocator* descriptorAllocator, 
+        CopyRequestManager* copyRequestManager)
+        :
+        GPUResource(accessStrategy, stateTracker, resourceAllocator, descriptorAllocator, copyRequestManager),
+        mRequstedStride{ properties.Stride },
+        mProperties{ properties }
+    {
+        if (accessStrategy == GPUResource::AccessStrategy::Automatic)
+        {
+            mBufferPtr = resourceAllocator->AllocateBuffer(properties);
+            mGetterBufferPtr = mBufferPtr.get();
+
+            if (mStateTracker) 
+                mStateTracker->StartTrakingResource(mBufferPtr.get());
+        }
+    }
+
+    Buffer::Buffer(
+        const HAL::BufferProperties& properties, 
+        ResourceStateTracker* stateTracker, 
+        SegregatedPoolsResourceAllocator* resourceAllocator, 
+        PoolDescriptorAllocator* descriptorAllocator, 
+        CopyRequestManager* copyRequestManager,
+        const HAL::Device& device, 
+        const HAL::Heap& mainResourceExplicitHeap, 
+        uint64_t explicitHeapOffset)
+        :
+        GPUResource(AccessStrategy::Automatic, stateTracker, resourceAllocator, descriptorAllocator, copyRequestManager),
+        mRequstedStride{ properties.Stride },
+        mProperties{ properties }
+    {
+        mBufferPtr = SegregatedPoolsResourceAllocator::BufferPtr{
+            new HAL::Buffer{ device, properties, mainResourceExplicitHeap, explicitHeapOffset },
+            [](HAL::Buffer* buffer) { delete buffer; }
+        };
+
+        mGetterBufferPtr = mBufferPtr.get();
+
+        if (mStateTracker)
+            mStateTracker->StartTrakingResource(mBufferPtr.get());
+    }
+
     Buffer::~Buffer()
     {
-        if (mStateTracker && mBufferPtr) mStateTracker->StopTrakingResource(mBufferPtr.get());
+        if (mStateTracker && mBufferPtr) 
+            mStateTracker->StopTrakingResource(mBufferPtr.get());
     }
 
     const HAL::CBDescriptor* Buffer::GetCBDescriptor() const
@@ -14,7 +63,7 @@ namespace Memory
         // or we're only using upload buffers (Direct Access) and no descriptors were 
         // created for upload buffer of this frame
         //
-        if (!mCBDescriptor || (!mBufferPtr && mCBDescriptorRequestFrameNumber != mFrameNumber))
+        if (!mCBDescriptor || (mAccessStrategy == GPUResource::AccessStrategy::DirectUpload && mCBDescriptorRequestFrameNumber != mFrameNumber))
         {
             mCBDescriptor = mDescriptorAllocator->AllocateCBDescriptor(*HALBuffer(), mRequstedStride);
             mCBDescriptorRequestFrameNumber = mFrameNumber;
@@ -25,7 +74,7 @@ namespace Memory
 
     const HAL::UADescriptor* Buffer::GetUADescriptor() const
     {
-        assert_format(mUploadStrategy != GPUResource::UploadStrategy::DirectAccess,
+        assert_format(mAccessStrategy != GPUResource::AccessStrategy::DirectUpload,
             "Direct Access buffers cannot have Unordered Access descriptors since they're always in GenericRead state");
 
         if (!mUADescriptor)
@@ -53,8 +102,7 @@ namespace Memory
 
     const HAL::Buffer* Buffer::HALBuffer() const
     {
-        return mUploadStrategy == GPUResource::UploadStrategy::Automatic ? 
-            mBufferPtr.get() : CurrentFrameUploadBuffer();
+        return mGetterBufferPtr;
     }
 
     const HAL::Resource* Buffer::HALResource() const
@@ -62,9 +110,24 @@ namespace Memory
         return HALBuffer();
     }
 
+    void Buffer::BeginFrame(uint64_t frameNumber)
+    {
+        GPUResource::BeginFrame(frameNumber);
+
+        HAL::Buffer* newCurrentBuffer = nullptr;
+
+        if (mAccessStrategy == GPUResource::AccessStrategy::DirectUpload)
+            newCurrentBuffer = CurrentFrameUploadBuffer();
+        else if (mAccessStrategy == GPUResource::AccessStrategy::DirectReadback)
+            newCurrentBuffer = CurrentFrameReadbackBuffer();
+
+        if (newCurrentBuffer)
+            mGetterBufferPtr = newCurrentBuffer;
+    }
+
     uint64_t Buffer::ResourceSizeInBytes() const
     {
-        return mBufferPtr ? mBufferPtr->TotalMemory() : mUploadBuffers.front().first->TotalMemory();
+        return mProperties.Size;
     }
 
     void Buffer::ApplyDebugName()
@@ -77,17 +140,23 @@ namespace Memory
         }
     }
 
-    void Buffer::RecordUploadCommands()
+    CopyRequestManager::CopyCommand Buffer::GetUploadCommands()
     {
-        if (mUploadStrategy != GPUResource::UploadStrategy::DirectAccess)
+        return[&](HAL::CopyCommandListBase& cmdList)
         {
-            mCommandListProvider->CommandList()->CopyBufferRegion(*CurrentFrameUploadBuffer(), *HALBuffer(), 0, HALBuffer()->ElementCapacity(), 0);
-        }
+            if (mAccessStrategy != GPUResource::AccessStrategy::DirectUpload)
+            {
+                cmdList.CopyBufferRegion(*CurrentFrameUploadBuffer(), *HALBuffer(), 0, HALBuffer()->ElementCapacity(), 0);
+            }
+        };
     }
 
-    void Buffer::RecordReadbackCommands()
+    CopyRequestManager::CopyCommand Buffer::GetReadbackCommands()
     {
-        mCommandListProvider->CommandList()->CopyBufferRegion(*HALBuffer(), *CurrentFrameReadbackBuffer(), 0, HALBuffer()->ElementCapacity(), 0);
+        return[&](HAL::CopyCommandListBase& cmdList)
+        {
+            cmdList.CopyBufferRegion(*HALBuffer(), *CurrentFrameReadbackBuffer(), 0, HALBuffer()->ElementCapacity(), 0);
+        };
     }
 
 }

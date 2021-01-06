@@ -1,4 +1,5 @@
-#include "../HardwareAbstractionLayer/DebugLayer.hpp"
+#include <HardwareAbstractionLayer/DebugLayer.hpp>
+#include "CopyRequestHandling.hpp"
 
 #include <pix.h>
 
@@ -22,7 +23,10 @@ namespace PathFinder
             mAftermathCrashTracker->Initialize();
         }
 
-        mDevice = std::make_unique<HAL::Device>(mAdapterFetcher.HardwareAdapters().front(), commandLineParser.ShouldEnableAftermath());
+        HAL::DisplayAdapter* hwAdapter = &mAdapterFetcher.GetHardwareAdapter(0);
+        mSelectedAdapter = hwAdapter;
+
+        mDevice = std::make_unique<HAL::Device>(*hwAdapter, commandLineParser.ShouldEnableAftermath());
 
         if (commandLineParser.ShouldEnableAftermath())
         {
@@ -34,12 +38,14 @@ namespace PathFinder
         mResourceAllocator = std::make_unique<Memory::SegregatedPoolsResourceAllocator>(mDevice.get(), mSimultaneousFramesInFlight);
         mCommandListAllocator = std::make_unique<Memory::PoolCommandListAllocator>(mDevice.get(), mSimultaneousFramesInFlight);
         mDescriptorAllocator = std::make_unique<Memory::PoolDescriptorAllocator>(mDevice.get(), mSimultaneousFramesInFlight);
+        mCopyRequestManager = std::make_unique<Memory::CopyRequestManager>();
 
         mResourceProducer = std::make_unique<Memory::GPUResourceProducer>(
             mDevice.get(), 
             mResourceAllocator.get(), 
             mResourceStateTracker.get(), 
-            mDescriptorAllocator.get());
+            mDescriptorAllocator.get(),
+            mCopyRequestManager.get());
 
         mPipelineResourceStorage = std::make_unique<PipelineResourceStorage>(
             mDevice.get(), 
@@ -48,6 +54,8 @@ namespace PathFinder
             mResourceStateTracker.get(), 
             mRenderSurfaceDescription, 
             &mRenderPassGraph);
+
+        mPipelineResourceStorage->SetMemoryAliasingEnabled(!commandLineParser.DisableMemoryAliasing());
 
         mResourceScheduler = std::make_unique<ResourceScheduler>(
             mPipelineResourceStorage.get(),
@@ -70,28 +78,34 @@ namespace PathFinder
         mPipelineStateCreator = std::make_unique<PipelineStateCreator>(mPipelineStateManager.get());
         mRootSignatureCreator = std::make_unique<RootSignatureCreator>(mPipelineStateManager.get());
         mSamplerCreator = std::make_unique<SamplerCreator>(mPipelineResourceStorage.get());
+        mGPUProfiler = std::make_unique<GPUProfiler>(*mDevice, 1024, mSimultaneousFramesInFlight, mResourceProducer.get());
 
         mRenderDevice = std::make_unique<RenderDevice>(
             *mDevice,
             mDescriptorAllocator.get(),
             mCommandListAllocator.get(), 
             mResourceStateTracker.get(), 
+            mCopyRequestManager.get(),
             mPipelineResourceStorage.get(), 
             mPipelineStateManager.get(), 
+            mGPUProfiler.get(),
             &mRenderPassGraph, 
             mRenderSurfaceDescription);
 
         mSwapChain = std::make_unique<HAL::SwapChain>(
+            &hwAdapter->Displays().front(),
             mRenderDevice->GraphicsCommandQueue(),
             windowHandle,
+            true,
             HAL::BackBufferingStrategy::Double, 
-            HAL::ColorFormat::RGBA8_Usigned_Norm, 
             mRenderSurfaceDescription.Dimensions());
 
         mRenderPassContainer = std::make_unique<RenderPassContainer<ContentMediator>>(
             mRenderDevice.get(),
             mPipelineResourceStorage.get(), 
             mPassUtilityProvider.get(),
+            mPipelineStateManager.get(),
+            mDescriptorAllocator.get(),
             &mRenderPassGraph);
 
         mSubPassScheduler = std::make_unique<SubPassScheduler<ContentMediator>>(
@@ -99,18 +113,11 @@ namespace PathFinder
             mPipelineResourceStorage.get(),
             mPassUtilityProvider.get());
 
-        mFrameFence = std::make_unique<HAL::Fence>(*mDevice);
+        mFrameFence = std::make_unique<FrameFence>(*mDevice);
 
-        for (auto& backBufferPtr : mSwapChain->BackBuffers())
-        {
-            mBackBuffers.emplace_back(mResourceProducer->NewTexture(backBufferPtr.get()));
-        }
-
-        // Prepare memory to be immediately used after engine construction
-        mFrameFence->IncrementExpectedValue();
-        NotifyStartFrame(mFrameFence->ExpectedValue());
-        mRenderDevice->AllocateUploadCommandList();
-        mResourceProducer->SetCommandList(mRenderDevice->PreRenderUploadsCommandList());
+        // Start first frame here to prepare engine for external data transfer requests
+        mFrameFence->HALFence().IncrementExpectedValue();
+        NotifyStartFrame(mFrameFence->HALFence().ExpectedValue());
     }
 
     template <class ContentMediator>
@@ -138,53 +145,16 @@ namespace PathFinder
     }
 
     template <class ContentMediator>
-    void RenderEngine<ContentMediator>::UploadProcessAndTransferAssets()
-    {
-        //// Let resources record upload commands into graphics cmd list
-        ////mResourceProducer.SetCommandList(mGraphicsDevice.CommandList());
-
-        //// Run resource scheduling
-        //ScheduleResources();
-
-        //// Run asset-processing passes
-        //RunAssetProcessingPasses();
-
-        //// Upload and process assets
-        //mGraphicsDevice.ExecuteCommands(nullptr, &mGraphicsFence);
-
-        //// Execute readback commands
-        //mGraphicsFence.IncrementExpectedValue();
-
-        //// Let resources record readback commands into graphics cmd list
-        ////mResourceProducer.SetCommandList(mGraphicsDevice.CommandList());
-
-        //// Read all requested to read resources
-        //mAssetStorage.ReadbackAllAssets();
-
-        //// Perform readbacks
-        //mGraphicsDevice.ExecuteCommands(nullptr, &mGraphicsFence);
-
-        //// Wait until both devices are finished
-        //mGraphicsFence.StallCurrentThreadUntilCompletion();
-        //mAsyncComputeFence.StallCurrentThreadUntilCompletion();
-
-        //mAssetStorage.ReportAllAssetsPostprocessed();
-    }
-
-    template <class ContentMediator>
     void RenderEngine<ContentMediator>::Render()
     {
         if (mRenderPassGraph.Nodes().empty()) return;
 
-        // First frame starts in engine constructor
+        // First frame statrts in constructor
         if (mFrameNumber > 0)
         {
-            mFrameFence->IncrementExpectedValue();
+            mFrameFence->HALFence().IncrementExpectedValue();
             // Notify internal listeners
-            NotifyStartFrame(mFrameFence->ExpectedValue());
-            // For first frame use upload cmd list allocated in constructor
-            mRenderDevice->AllocateUploadCommandList();
-            mResourceProducer->SetCommandList(mRenderDevice->PreRenderUploadsCommandList());
+            NotifyStartFrame(mFrameFence->HALFence().ExpectedValue());
         }
 
         // Scheduler resources, build graph
@@ -193,15 +163,17 @@ namespace PathFinder
         // Compile new states and signatures, if any
         mPipelineStateManager->CompileUncompiledSignaturesAndStates();
 
-        // Update render device with current frame back buffer
-        mRenderDevice->SetBackBuffer(mBackBuffers[mCurrentBackBufferIndex].get());
-
         // Notify external listeners
         mPreRenderEvent.Raise();
 
-        // Build AS
-        mRenderDevice->PreRenderUploadsCommandList()->Close();
-        mRenderDevice->AllocateRTASBuildsCommandList();
+        // External listeners might've caused back buffer reallocation
+        if (mSwapChain->AreBackBuffersUpdated())
+            UpdateBackBuffers();
+
+        // Update render device with current frame back buffer
+        mRenderDevice->SetBackBuffer(mBackBuffers[mCurrentBackBufferIndex].get());
+
+        UploadAssets();
         BuildAccelerationStructures();
 
         // Render
@@ -213,11 +185,14 @@ namespace PathFinder
         mSwapChain->Present();
 
         // Issue a CPU wait if necessary
-        mRenderDevice->GraphicsCommandQueue().SignalFence(*mFrameFence);
+        mRenderDevice->GraphicsCommandQueue().SignalFence(mFrameFence->HALFence());
         mFrameFence->StallCurrentThreadUntilCompletion(mSimultaneousFramesInFlight);
 
         // Notify internal listeners
-        NotifyEndFrame(mFrameFence->CompletedValue());
+        NotifyEndFrame(mFrameFence->HALFence().CompletedValue());
+
+        // Gather extracted measurement
+        mRenderDevice->GatherMeasurements();
 
         // Notify external listeners
         mPostRenderEvent.Raise();
@@ -235,11 +210,12 @@ namespace PathFinder
     void RenderEngine<ContentMediator>::NotifyStartFrame(uint64_t newFrameNumber)
     {
         mShaderManager->BeginFrame();
-        mPipelineResourceStorage->BeginFrame();
         mResourceAllocator->BeginFrame(newFrameNumber);
         mDescriptorAllocator->BeginFrame(newFrameNumber);
         mCommandListAllocator->BeginFrame(newFrameNumber);
         mResourceProducer->BeginFrame(newFrameNumber);
+        mPipelineResourceStorage->BeginFrame();
+        mGPUProfiler->BeginFrame(newFrameNumber);
 
         mFrameStartTimestamp = std::chrono::steady_clock::now();
     }
@@ -248,11 +224,12 @@ namespace PathFinder
     void RenderEngine<ContentMediator>::NotifyEndFrame(uint64_t completedFrameNumber)
     {
         mShaderManager->EndFrame();
-        mPipelineResourceStorage->EndFrame();
         mResourceProducer->EndFrame(completedFrameNumber);
         mResourceAllocator->EndFrame(completedFrameNumber);
         mDescriptorAllocator->EndFrame(completedFrameNumber);
         mCommandListAllocator->EndFrame(completedFrameNumber);
+        mPipelineResourceStorage->EndFrame();
+        mGPUProfiler->EndFrame(completedFrameNumber);
 
         using namespace std::chrono;
         mFrameDuration = duration_cast<microseconds>(steady_clock::now() - mFrameStartTimestamp);
@@ -270,6 +247,16 @@ namespace PathFinder
     }
 
     template <class ContentMediator>
+    void RenderEngine<ContentMediator>::UploadAssets()
+    {
+        mRenderDevice->AllocateUploadCommandList();
+        RecordUploadRequests(*mRenderDevice->PreRenderUploadsCommandList(), *mResourceStateTracker, *mCopyRequestManager, true);
+        mRenderDevice->PreRenderUploadsCommandList()->Close();
+
+        assert_format(mCopyRequestManager->ReadbackRequests().empty(), "We shouldn't have any readback requests at this stage");
+    }
+
+    template <class ContentMediator>
     void RenderEngine<ContentMediator>::BuildAccelerationStructures()
     {
         if (!mRenderPassGraph.FirstNodeThatUsesRayTracing())
@@ -278,6 +265,8 @@ namespace PathFinder
             // if no render passes consume them
             return;
         }
+
+        mRenderDevice->AllocateRTASBuildsCommandList();
 
         HAL::ResourceBarrierCollection bottomRTASUABarriers{};
 
@@ -298,21 +287,7 @@ namespace PathFinder
         }
 
         mRenderDevice->RTASBuildsCommandList()->InsertBarriers(topRTASUABarriers);
-
         mRenderDevice->RTASBuildsCommandList()->Close();
-    }
-
-    template <class ContentMediator>
-    void RenderEngine<ContentMediator>::RunAssetProcessingPasses()
-    {
-        /*auto& nodes = mPassExecutionGraph.AssetProcessingPasses();
-
-        for (auto nodeIt = nodes.begin(); nodeIt != nodes.end(); ++nodeIt)
-        {
-            mGraphicsDevice.ResetViewportToDefault();
-            mPipelineResourceStorage.SetCurrentRenderPassGraphNode(*nodeIt);
-            mRenderPasses[nodeIt->PassMetadata.Name]->Render(&mContext);
-        }*/
     }
 
     template <class ContentMediator>
@@ -342,11 +317,6 @@ namespace PathFinder
                 recordCommandList(passHelpers, *passNode);
             }
         }
-
-        // TODO: When multi threading is implemented, insert a sync here
-        // because render passes request transitions in the state tracker
-        // and we treat those as prerender transitions alongside external resource 
-        // upload transitions
     }
 
     template <class ContentMediator>
@@ -397,6 +367,20 @@ namespace PathFinder
         // Finish graph and allocate memory 
         mRenderPassGraph.Build();
         mPipelineResourceStorage->AllocateScheduledResources();
+    }
+
+    template <class ContentMediator>
+    void RenderEngine<ContentMediator>::UpdateBackBuffers()
+    {
+        // Because this function is called before rendering, but after new frame fence increase,
+        // we pass 2 instead of 1 to stall CPU thread
+        mFrameFence->StallCurrentThreadUntilCompletion(2);
+        mBackBuffers.clear();
+
+        for (auto& backBufferPtr : mSwapChain->BackBuffers())
+        {
+            mBackBuffers.emplace_back(mResourceProducer->NewTexture(backBufferPtr.get()));
+        }
     }
 
     template <class ContentMediator> 
